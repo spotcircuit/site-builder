@@ -5,8 +5,8 @@ Scrapes a single business from Google Maps using Playwright.
 Extracts all data needed to generate a website: profile info, photos, reviews,
 hours, services, and location coordinates.
 
-Adapted from the lead_finder project's scraper pattern but focused on
-comprehensive single-business data extraction.
+Selectors ported from the getrankedlocal production scrapers which are
+confirmed working as of 2025.
 """
 
 import asyncio
@@ -33,6 +33,7 @@ class BusinessData(BaseModel):
     review_count: Optional[int] = None
     category: Optional[str] = None
     hours: Optional[dict[str, str]] = Field(default=None, description="Day -> hours string mapping")
+    hours_raw: Optional[str] = Field(default=None, description="Raw hours aria-label string")
     services: Optional[list[str]] = None
     photos: Optional[list[str]] = Field(default=None, description="Photo URLs from the business listing")
     reviews: Optional[list[dict[str, Any]]] = Field(
@@ -43,141 +44,341 @@ class BusinessData(BaseModel):
     longitude: Optional[float] = None
     place_id: Optional[str] = None
     cid: Optional[str] = None
+    open_now: Optional[bool] = None
+    status_text: Optional[str] = None
+    description: Optional[str] = Field(default=None, description="Short business description from Google Maps overview")
+    photo_count: Optional[int] = Field(default=None, description="Total photos available on Google Maps")
+    review_topics: Optional[dict[str, int]] = Field(default=None, description="Topics mentioned in reviews with counts")
+    price_info: Optional[str] = None
+    has_menu: Optional[bool] = None
+    links: Optional[dict[str, str]] = Field(default=None, description="Appointment, order, menu links")
 
 
-# JavaScript to extract the main business profile data from the Google Maps DOM.
-# Runs in-page to avoid multiple round trips. Returns a flat dict of extracted fields.
+# ---------------------------------------------------------------------------
+# JavaScript to extract business profile - uses proven getrankedlocal selectors
+# ---------------------------------------------------------------------------
 EXTRACT_PROFILE_JS = """() => {
     const data = {};
 
-    // Business name - the main heading
-    const nameEl = document.querySelector('h1.DUwDvf, h1[data-attrid="title"], h1');
-    if (nameEl) data.name = nameEl.innerText.trim();
+    // Name - h1 with aria-label (most reliable), then plain h1 fallback
+    const nameElem = document.querySelector('h1[aria-label]') || document.querySelector('h1.DUwDvf') || document.querySelector('h1');
+    if (nameElem) data.name = nameElem.innerText.trim();
 
-    // Address - look for the address button/div
-    const addrEl = document.querySelector(
-        'button[data-item-id="address"] .Io6YTe, ' +
-        'button[data-item-id="address"] .rogA2c, ' +
-        '[data-item-id="address"]'
-    );
-    if (addrEl) data.address = addrEl.innerText.trim();
+    // Address - data-item-id="address"
+    const addressElem = document.querySelector('[data-item-id="address"]');
+    if (addressElem) {
+        data.address = addressElem.innerText
+            .replace(/\\n/g, ', ')
+            .replace(/[\\u0000-\\u001F\\u007F-\\uFFFF]/g, '')
+            .replace(/^[,\\s]+/, '')  // Remove leading commas/spaces
+            .trim();
+    }
 
-    // Phone
-    const phoneEl = document.querySelector(
-        'button[data-item-id^="phone:"] .Io6YTe, ' +
-        'button[data-item-id^="phone:"] .rogA2c, ' +
-        '[data-item-id^="phone:"]'
-    );
-    if (phoneEl) {
-        let phoneText = phoneEl.innerText.trim();
-        // Extract just the phone number if there's extra text
-        const phoneMatch = phoneText.match(/[\\d()\\s.+-]{7,}/);
-        if (phoneMatch) data.phone = phoneMatch[0].trim();
-        else data.phone = phoneText;
+    // Phone - extracted from data-item-id attribute itself (most reliable)
+    const phoneElem = document.querySelector('[data-item-id^="phone:tel:"]');
+    if (phoneElem) {
+        const phoneAttr = phoneElem.getAttribute('data-item-id');
+        data.phone = phoneAttr.replace('phone:tel:', '');
     }
 
     // Website
-    const webEl = document.querySelector(
-        'a[data-item-id="authority"], ' +
-        'button[data-item-id="authority"] .Io6YTe, ' +
-        '[data-item-id="authority"]'
-    );
-    if (webEl) {
-        data.website = webEl.getAttribute('href') || webEl.innerText.trim();
+    const websiteElem = document.querySelector('[data-item-id="authority"]');
+    if (websiteElem) {
+        // Try href first, then innerText
+        const href = websiteElem.getAttribute('href') || '';
+        if (href && href.startsWith('http')) {
+            data.website = href;
+        } else {
+            data.website = websiteElem.innerText.trim()
+                .replace(/[\\u0000-\\u001F\\u007F-\\uFFFF]/g, '')
+                .trim();
+        }
     }
 
-    // Rating
-    const ratingEl = document.querySelector(
-        'div.F7nice span[aria-hidden="true"], ' +
-        'span.ceNzKf, ' +
-        'div.fontDisplayLarge'
-    );
-    if (ratingEl) {
-        const val = parseFloat(ratingEl.innerText.trim().replace(',', '.'));
-        if (!isNaN(val) && val > 0 && val <= 5) data.rating = val;
+    // Rating - prefer role="img" elements with numeric star labels
+    try {
+        const ratingEls = document.querySelectorAll(
+            '[role="img"][aria-label*="stars"], [aria-label*="stars"], div[aria-label*="Rated"]'
+        );
+        for (const el of ratingEls) {
+            const r = (el.getAttribute('aria-label') || '').trim();
+            const m = r.match(/([0-9]+(?:\\.[0-9]+)?)\\s*stars?/i);
+            if (m) {
+                data.rating = parseFloat(m[1]);
+                break;
+            }
+        }
+    } catch {}
+
+    // Review count - broad search for "N reviews" pattern
+    // Also try aria-labels like "4.3 stars 523 reviews"
+    try {
+        // Method 1: from aria-label that contains both stars and reviews
+        const starReviewEls = document.querySelectorAll('[aria-label*="review"]');
+        for (const el of starReviewEls) {
+            const label = el.getAttribute('aria-label') || '';
+            const m = label.match(/([\d,]+)\s+reviews?/i);
+            if (m) {
+                data.review_count = parseInt(m[1].replace(/,/g, ''), 10);
+                break;
+            }
+        }
+        // Method 2: from text content
+        if (!data.review_count) {
+            const candidates = Array.from(document.querySelectorAll('button, a, span, div'));
+            const revEl = candidates.find(el =>
+                (el.textContent || '').match(/\\b[\\d,]+\\s+reviews?\\b/i)
+            );
+            if (revEl) {
+                const txt = revEl.textContent || '';
+                const m = txt.match(/\\b([\\d,]+)\\s+reviews?\\b/i);
+                if (m) data.review_count = parseInt(m[1].replace(/,/g, ''), 10);
+            }
+        }
+    } catch {}
+
+    // Category - try specific selectors, then look for text with · or ending patterns
+    let categoryText = '';
+    const catElem = document.querySelector('button[jsaction*="pane.rating.category"]') ||
+                    document.querySelector('[data-value="category"]') ||
+                    document.querySelector('span[class*="category"]');
+    if (catElem) {
+        categoryText = catElem.innerText || '';
+    }
+    if (!categoryText) {
+        // Look for buttons/spans that contain category-like text
+        // Category appears as "Latin American restaurant·" or similar
+        const candidates = document.querySelectorAll('button, span, a');
+        for (const el of candidates) {
+            const t = (el.innerText || '').trim();
+            // Match text containing · (middle dot) or ending with common category words
+            if (t && t.length > 3 && t.length < 60 &&
+                !t.includes('star') && !t.includes('review') &&
+                !t.includes('Directions') && !t.includes('Save') &&
+                (t.includes('·') || t.includes('\\u00b7') ||
+                 t.endsWith('restaurant') || t.endsWith('bar') ||
+                 t.endsWith('shop') || t.endsWith('store') ||
+                 t.endsWith('service') || t.endsWith('salon'))) {
+                categoryText = t;
+                break;
+            }
+        }
+    }
+    if (categoryText) {
+        // Split on any middle dot variant and take the first part
+        const clean = categoryText.split(/[·\\u00b7\\u2022\\u2027]/)[0].trim();
+        if (clean && clean.length > 2) {
+            data.category = clean;
+        }
     }
 
-    // Review count
-    const reviewCountEl = document.querySelector(
-        'div.F7nice span[aria-label*="review"], ' +
-        'span.RDApEe, ' +
-        'button[jsaction*="review"] span'
-    );
-    if (reviewCountEl) {
-        const text = reviewCountEl.innerText || reviewCountEl.getAttribute('aria-label') || '';
-        const countMatch = text.replace(/,/g, '').match(/(\\d+)/);
-        if (countMatch) data.review_count = parseInt(countMatch[1]);
-    }
+    // Business description (the short blurb on the overview)
+    try {
+        // Look for the description text - usually a div/span with a sentence about the business
+        const descCandidates = document.querySelectorAll('div, span');
+        for (const el of descCandidates) {
+            const t = (el.innerText || '').trim();
+            // Description is typically 30-300 chars, contains periods, and isn't an address
+            if (t.length > 30 && t.length < 300 && t.includes('.') &&
+                !t.includes('\\n') && !t.includes('Directions') &&
+                !t.includes('Save') && !t.includes('Share') &&
+                !t.includes('stars') && !t.includes('review')) {
+                data.description = t;
+                break;
+            }
+        }
+    } catch {}
 
-    // Category
-    const catEl = document.querySelector(
-        'button[jsaction*="category"] .DkEaL, ' +
-        'button.DkEaL, ' +
-        'span.DkEaL'
-    );
-    if (catEl) data.category = catEl.innerText.trim();
-
-    // Hours - from the hours table/section
+    // Hours - Method 1: individual day buttons (most reliable, from production code)
     const hours = {};
-    const hourRows = document.querySelectorAll(
-        'table.eK4R0e tr, ' +
-        'table.WgFkxc tr, ' +
-        'div[aria-label*="hour"] table tr'
-    );
-    for (const row of hourRows) {
-        const cells = row.querySelectorAll('td');
-        if (cells.length >= 2) {
-            const day = cells[0].innerText.trim();
-            const time = cells[1].innerText.trim();
-            if (day && time) hours[day] = time;
+    try {
+        const hoursButtons = document.querySelectorAll(
+            'button[aria-label*="day,"][aria-label*="AM"], ' +
+            'button[aria-label*="day,"][aria-label*="PM"], ' +
+            'button[aria-label*="day,"][aria-label*="Closed"]'
+        );
+        hoursButtons.forEach(btn => {
+            const label = btn.getAttribute('aria-label');
+            if (label) {
+                const match = label.match(/^(\\w+day),\\s*(.+?)(?:,\\s*Copy)?$/);
+                if (match) {
+                    let hoursText = match[2]
+                        .replace(/, Copy open hours/g, '')
+                        .replace(/[\\u202f]/g, ' ')
+                        .trim();
+                    hours[match[1]] = hoursText;
+                }
+            }
+        });
+    } catch {}
+
+    // Hours - Method 2: table rows (fallback)
+    if (Object.keys(hours).length === 0) {
+        const hourRows = document.querySelectorAll(
+            'table.eK4R0e tr, table.WgFkxc tr, table.y0skZc tr, ' +
+            'div[aria-label*="hour"] table tr'
+        );
+        for (const row of hourRows) {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 2) {
+                const day = cells[0].innerText.trim();
+                const time = cells[1].innerText.trim();
+                if (day && time) hours[day] = time;
+            }
         }
     }
     if (Object.keys(hours).length > 0) data.hours = hours;
 
-    // If no hours table found, try the collapsed hours display
-    if (!data.hours) {
-        const hoursBtn = document.querySelector(
-            '[data-item-id="oh"] .Io6YTe, ' +
-            'div[aria-label*="hours"] .Io6YTe'
+    // Hours - Method 3: raw aria-label string (last resort, parsed in Python)
+    if (Object.keys(hours).length === 0) {
+        const hoursElem = document.querySelector('[aria-label*="Hours"]');
+        if (hoursElem) {
+            data.hours_raw = hoursElem.getAttribute('aria-label');
+        }
+    }
+
+    // Photo count (so we know how many are available)
+    try {
+        const photoButtons = document.querySelectorAll('[aria-label*="Photos"], [aria-label*="photos"]');
+        photoButtons.forEach(btn => {
+            const label = btn.getAttribute('aria-label');
+            if (label) {
+                const match = label.match(/(\\d+)\\s+photos?/);
+                if (match) data.photo_count = parseInt(match[1]);
+            }
+        });
+    } catch {}
+
+    // Review topics (what people mention most)
+    try {
+        const topicButtons = document.querySelectorAll(
+            'button[aria-label*="mentioned in"][aria-label*="reviews"]'
         );
-        if (hoursBtn) {
-            data.hours_summary = hoursBtn.innerText.trim();
+        if (topicButtons.length > 0) {
+            const topics = {};
+            topicButtons.forEach(btn => {
+                const label = btn.getAttribute('aria-label');
+                if (label) {
+                    const match = label.match(/([^,]+),\\s*mentioned in\\s*(\\d+)\\s*reviews?/);
+                    if (match) topics[match[1].trim()] = parseInt(match[2]);
+                }
+            });
+            if (Object.keys(topics).length > 0) data.review_topics = topics;
         }
-    }
+    } catch {}
 
-    // Services - from the services/amenities sections
-    const serviceEls = document.querySelectorAll(
-        'div[data-attrid*="service"] li, ' +
-        'div.LQjNnc span, ' +
-        'div[aria-label*="Service"] span.hYBQ4b'
-    );
-    const services = [];
-    for (const el of serviceEls) {
-        const txt = el.innerText.trim();
-        if (txt && txt.length < 100 && !services.includes(txt)) {
-            services.push(txt);
+    // Services/amenities - filter out non-service icons
+    try {
+        const skipPatterns = /stars?|hours|open|show|photo|review|rating|price/i;
+        const chipEls = Array.from(document.querySelectorAll(
+            '[role="img"][aria-label*="Has"], ' +
+            '[role="img"][aria-label*="accessible"], ' +
+            '[role="img"][aria-label*="Wheelchair"], ' +
+            'button[aria-label*="Has"], button[aria-label*="Offers"]'
+        ));
+        const serviceSet = new Set();
+        for (const el of chipEls) {
+            let label = (el.getAttribute('aria-label') || '').trim();
+            if (!label || skipPatterns.test(label)) continue;
+            label = label.replace(/^(Has|Offers)\\s+/i, '');
+            if (label.length > 2 && label.length < 80) serviceSet.add(label);
         }
+        const services = Array.from(serviceSet);
+        if (services.length > 0) data.services = services;
+    } catch {}
+
+    // Open/Closed status - find the smallest element with Open/Closed text
+    try {
+        const statusCandidates = Array.from(document.querySelectorAll('span, div'));
+        let bestEl = null;
+        let bestLen = Infinity;
+        for (const el of statusCandidates) {
+            const t = (el.innerText || '').trim();
+            if (t.length < 80 && t.length < bestLen &&
+                /\\b(Open|Closed|Closes|Opens)\\b/i.test(t) &&
+                (t.includes('·') || t.includes('Closes') || t.includes('Opens') || t === 'Open' || t === 'Closed')) {
+                bestEl = el;
+                bestLen = t.length;
+            }
+        }
+        if (bestEl) {
+            const s = bestEl.innerText.trim();
+            data.status_text = s;
+            data.open_now = /\\bOpen\\b/i.test(s) && !/\\bClosed\\b/i.test(s);
+        }
+    } catch {}
+
+    // Price level
+    const priceElem = document.querySelector('[aria-label*="Price"]');
+    if (priceElem) {
+        data.price_info = priceElem.getAttribute('aria-label');
     }
-    if (services.length > 0) data.services = services;
 
-    // Coordinates from the page URL
-    const url = window.location.href;
-    const coordMatch = url.match(/@(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)/);
-    if (coordMatch) {
-        data.latitude = parseFloat(coordMatch[1]);
-        data.longitude = parseFloat(coordMatch[2]);
-    }
+    // Menu link
+    const menuElem = document.querySelector('[data-item-id="menu"]');
+    if (menuElem) data.has_menu = true;
 
-    // Place ID from URL
-    const placeMatch = url.match(/place\\/[^/]+\\/([^/]+)/);
-    if (placeMatch) data.url_place_segment = placeMatch[1];
+    // Appointment / Order / Reserve links
+    try {
+        const linkCandidates = Array.from(document.querySelectorAll('a[aria-label], a[data-item-id]'));
+        const links = {};
+        for (const a of linkCandidates) {
+            const label = (a.getAttribute('aria-label') || a.getAttribute('data-item-id') || '').toLowerCase();
+            const href = a.getAttribute('href') || '';
+            if (!href) continue;
+            if (label.includes('appointment') || label.includes('reserve')) links.appointment = href;
+            if (label.includes('order')) links.order = href;
+            if (label.includes('menu')) links.menu = href;
+        }
+        if (Object.keys(links).length) data.links = links;
+    } catch {}
 
-    // CID from URL params or data attributes
-    const cidMatch = url.match(/[?&]cid=(\\d+)/);
+    // Coordinates from URL
+    const currentUrl = window.location.href;
+    try {
+        const coordMatch = currentUrl.match(/@(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)/);
+        if (coordMatch) {
+            data.latitude = parseFloat(coordMatch[1]);
+            data.longitude = parseFloat(coordMatch[2]);
+        }
+    } catch {}
+
+    // CID from URL
+    const cidMatch = currentUrl.match(/[?&]cid=([^&]+)/);
     if (cidMatch) data.cid = cidMatch[1];
 
     return data;
 }"""
+
+
+def _parse_hours_from_aria_label(hours_raw: str) -> dict[str, str]:
+    """Parse an hours aria-label string like 'Hours: Monday, 9 AM to 5 PM; Tuesday, ...'
+    into a day->hours dict."""
+    hours: dict[str, str] = {}
+    if not hours_raw:
+        return hours
+
+    # Remove the "Hours: " or "Hours " prefix
+    text = hours_raw.replace("Hours:", "").replace("Hours", "").strip()
+
+    # Split by semicolons or periods to get individual day entries
+    import re
+    entries = re.split(r'[;.]', text)
+    for entry in entries:
+        entry = entry.strip()
+        if not entry:
+            continue
+        # Try to split on first comma: "Monday, 9 AM to 5 PM"
+        parts = entry.split(',', 1)
+        if len(parts) == 2:
+            day = parts[0].strip()
+            time_str = parts[1].strip()
+            if day and time_str:
+                hours[day] = time_str
+        elif entry:
+            # Might be "Open 24 hours" or similar
+            hours["Note"] = entry
+    return hours
 
 
 async def _notify(callback: ProgressCallback, step: str, message: str) -> None:
@@ -189,88 +390,138 @@ async def _notify(callback: ProgressCallback, step: str, message: str) -> None:
             logger.debug("Progress callback error (non-fatal): %s", exc)
 
 
-async def extract_photos(page: Page, max_photos: int = 6) -> list[str]:
+def _clean_photo_url(src: str) -> str | None:
+    """Normalise a Google photo URL to a high-res version.
+
+    Returns None for non-photo URLs (data URIs, avatars, tiny icons).
     """
-    Click the Photos tab on a Google Maps business page and extract image URLs.
+    if not src or src.startswith("data:"):
+        return None
+    if "googleusercontent" not in src:
+        return None
+    # Skip reviewer avatars / profile pics (small, marked with -rp-mo)
+    if "-rp-mo" in src or "s40-k" in src or "s36-" in src or "w36-" in src:
+        return None
+    # Must be a business photo (contains /p/ or /gps-cs or /gps-proxy)
+    if not any(seg in src for seg in ["/p/", "/gps-cs", "/gps-proxy"]):
+        return None
+    # Get the base URL without size params and set high-res
+    base = src.split("=")[0]
+    return base + "=w800-h600-k-no"
+
+
+async def extract_photos(page: Page, max_photos: int = 8) -> list[str]:
+    """
+    Extract business photo URLs from a Google Maps page.
+
+    Strategy:
+      1. First grab any photos already visible on the overview page (hero + thumbnails).
+      2. Then click the Photos tab and collect from the photo grid.
+      3. Deduplicate by base URL (before the =wNNN params).
 
     Args:
         page: The Playwright page already on the business listing.
         max_photos: Maximum number of photo URLs to collect.
 
     Returns:
-        List of photo URL strings. May be empty if extraction fails.
+        List of unique photo URL strings. May be empty if extraction fails.
     """
+    seen_bases: set[str] = set()
     photos: list[str] = []
 
+    def _add(url: str) -> None:
+        clean = _clean_photo_url(url)
+        if clean and clean.split("=")[0] not in seen_bases and len(photos) < max_photos:
+            seen_bases.add(clean.split("=")[0])
+            photos.append(clean)
+
     try:
-        # Click the Photos tab - try multiple selectors
-        photos_tab = await page.query_selector(
-            'button[aria-label*="Photo"], '
-            'button[data-tab-id="photos"], '
-            'a[href*="tab=photos"], '
-            'button[jsaction*="photos"]'
-        )
-        if not photos_tab:
-            # Try clicking by text content
-            photos_tab = await page.query_selector('button:has-text("Photos")')
+        # ── Phase 1: Grab photos already on the overview page ──
+        overview_urls = await page.evaluate("""() => {
+            const urls = [];
+            // Hero image and thumbnail grid on the overview page
+            // Google uses both /p/ and /gps-cs-s/ paths for business photos
+            const imgs = document.querySelectorAll(
+                'img[src*="googleusercontent.com/p/"],' +
+                'img[src*="googleusercontent.com/gps-cs"],' +
+                'img[src*="googleusercontent.com/gps-proxy"],' +
+                '[data-photo-index] img[src*="googleusercontent"],' +
+                'button[aria-label*="Photo"] img[src*="googleusercontent"]'
+            );
+            for (const img of imgs) {
+                const src = img.src || img.getAttribute('data-src') || '';
+                if (src && !src.startsWith('data:') && src.includes('googleusercontent')) {
+                    urls.push(src);
+                }
+            }
+            return urls;
+        }""")
 
-        if photos_tab:
-            await photos_tab.click()
-            await asyncio.sleep(2)
+        for u in (overview_urls or []):
+            _add(u)
 
-            # Wait for photo grid to load
-            await page.wait_for_selector(
-                'div[data-photo-index] img, '
-                'div.U39Pmb img, '
-                'div[role="img"], '
-                'a[data-photo-index] img, '
-                'button[data-photo-index] img',
-                timeout=5000,
+        # ── Phase 2: Click Photos tab for more images ──
+        if len(photos) < max_photos:
+            photos_tab = await page.query_selector(
+                'button[aria-label*="Photo"], '
+                'button[data-tab-id="photos"], '
+                'a[aria-label*="Photos"], '
+                'button[jsaction*="photos"], '
+                'button:has-text("Photos")'
             )
-            await asyncio.sleep(1)
+            if photos_tab:
+                await photos_tab.click()
+                await asyncio.sleep(2)
 
-        # Extract image URLs from the page - photos can appear in grid or carousel
-        photo_urls = await page.evaluate(f"""() => {{
-            const urls = new Set();
-            const maxCount = {max_photos};
+                # Wait for photo grid to load
+                try:
+                    await page.wait_for_selector(
+                        '[data-photo-index] img, '
+                        'img[decoding="async"][src*="googleusercontent"]',
+                        timeout=5000,
+                    )
+                    await asyncio.sleep(1)
+                except Exception:
+                    pass
 
-            // Try multiple selectors for photo elements
-            const selectors = [
-                'div[data-photo-index] img',
-                'a[data-photo-index] img',
-                'button[data-photo-index] img',
-                'div.U39Pmb img',
-                'img.Uf0tqf',
-                'img[decoding="async"][src*="googleusercontent"]',
-                'img[src*="lh5.googleusercontent"]',
-                'img[src*="lh3.googleusercontent"]',
-            ];
+                # Scroll once to load more thumbnails
+                scrollable = await page.query_selector(
+                    'div.m6QErb, div[role="main"]'
+                )
+                if scrollable:
+                    try:
+                        await scrollable.evaluate('(el) => el.scrollBy(0, 600)')
+                        await asyncio.sleep(1)
+                    except Exception:
+                        pass
 
-            for (const selector of selectors) {{
-                if (urls.size >= maxCount) break;
-                const imgs = document.querySelectorAll(selector);
-                for (const img of imgs) {{
-                    if (urls.size >= maxCount) break;
-                    const src = img.src || img.getAttribute('data-src') || '';
-                    // Only include real Google photo URLs, skip data: URIs and icons
-                    if (src && !src.startsWith('data:') && src.includes('google')) {{
-                        // Attempt to get a higher-resolution version by modifying the URL params
-                        let cleanUrl = src.split('=')[0];
-                        if (cleanUrl.includes('googleusercontent')) {{
-                            cleanUrl += '=w800-h600-no';
-                        }} else {{
-                            cleanUrl = src;
-                        }}
-                        urls.add(cleanUrl);
-                    }}
-                }}
-            }}
+                grid_urls = await page.evaluate("""() => {
+                    const urls = [];
+                    const selectors = [
+                        '[data-photo-index] img',
+                        'a[data-photo-index] img',
+                        'button[data-photo-index] img',
+                        'div.U39Pmb img',
+                        'img[decoding="async"][src*="googleusercontent"]',
+                        'img[src*="lh3.googleusercontent"]',
+                        'img[src*="lh5.googleusercontent"]',
+                        'img[src*="googleusercontent.com/gps-cs"]',
+                        'img[src*="googleusercontent.com/gps-proxy"]',
+                    ];
+                    for (const sel of selectors) {
+                        const imgs = document.querySelectorAll(sel);
+                        for (const img of imgs) {
+                            const src = img.src || img.getAttribute('data-src') || '';
+                            if (src && !src.startsWith('data:') && src.includes('googleusercontent')) {
+                                urls.push(src);
+                            }
+                        }
+                    }
+                    return urls;
+                }""")
 
-            return Array.from(urls);
-        }}""")
-
-        if photo_urls:
-            photos = photo_urls[:max_photos]
+                for u in (grid_urls or []):
+                    _add(u)
 
     except Exception as exc:
         logger.warning("Photo extraction failed (non-fatal): %s", exc)
@@ -280,109 +531,171 @@ async def extract_photos(page: Page, max_photos: int = 6) -> list[str]:
 
 async def extract_reviews(page: Page, max_reviews: int = 5) -> list[dict[str, Any]]:
     """
-    Click the Reviews tab on a Google Maps business page, scroll once to load
-    content, and extract review data.
+    Click the Reviews tab, scroll to load content, and extract review data.
+    Uses the proven getrankedlocal production selectors.
 
     Args:
         page: The Playwright page already on the business listing.
         max_reviews: Maximum number of reviews to collect.
 
     Returns:
-        List of review dicts with keys: author, rating, text, time.
-        May be empty if extraction fails.
+        List of review dicts with keys: author, rating, text, time, helpful.
     """
     reviews: list[dict[str, Any]] = []
 
     try:
-        # Click the Reviews tab
+        # Click the Reviews tab - production selectors
+        # Only proceed if a Reviews tab actually exists
         reviews_tab = await page.query_selector(
-            'button[aria-label*="Review"], '
-            'button[data-tab-id="reviews"], '
-            'a[href*="tab=reviews"], '
-            'button[jsaction*="review"]'
+            'button[aria-label*="Reviews"], '
+            'button[role="tab"]:has-text("Reviews")'
         )
         if not reviews_tab:
             reviews_tab = await page.query_selector('button:has-text("Reviews")')
 
-        if reviews_tab:
-            await reviews_tab.click()
-            await asyncio.sleep(2)
+        if not reviews_tab:
+            logger.info("No Reviews tab found - business may have too few reviews")
+            return reviews
 
-        # Wait for reviews to load
-        await page.wait_for_selector(
-            'div.jftiEf, div[data-review-id], div.WMbnJf',
-            timeout=5000,
-        )
+        await reviews_tab.click()
+        await asyncio.sleep(1.5)
 
-        # Scroll once within the reviews pane to load more
-        scrollable = await page.query_selector(
-            'div.m6QErb.DxyBCb, div.m6QErb[role="feed"], div.section-scrollbox'
+        # Scroll the review feed to load more reviews
+        review_feed = await page.query_selector(
+            '[role="feed"], .m6QErb[aria-label*="Reviews"]'
         )
-        if scrollable:
-            await scrollable.evaluate('el => el.scrollBy(0, 800)')
-            await asyncio.sleep(1.5)
+        if review_feed:
+            for _ in range(3):
+                await review_feed.evaluate('(element) => element.scrollTop = element.scrollHeight')
+                await asyncio.sleep(1)
 
         # Expand truncated review text by clicking "More" buttons
         more_buttons = await page.query_selector_all(
             'button.w8nwRe, button[aria-label="See more"], '
             'button.M77dve, a.review-more-link'
         )
-        for btn in more_buttons[:max_reviews]:
+        for btn in more_buttons[:max_reviews + 5]:
             try:
                 await btn.click()
                 await asyncio.sleep(0.3)
             except Exception:
                 pass
 
-        # Extract review data
-        reviews = await page.evaluate(f"""() => {{
-            const results = [];
-            const maxCount = {max_reviews};
+        # Extract review data using production JS
+        reviews = await page.evaluate(f"""(maxReviews) => {{
+            const reviews = [];
 
-            const reviewEls = document.querySelectorAll(
-                'div.jftiEf, div[data-review-id], div.WMbnJf'
+            // Find review containers - production selectors
+            const reviewElements = document.querySelectorAll(
+                '[data-review-id], [jslog*="review"], div[aria-label*="stars"][role="img"]'
             );
+            const reviewContainers = [];
 
-            for (const el of reviewEls) {{
-                if (results.length >= maxCount) break;
+            // Walk up to find parent container with enough content
+            reviewElements.forEach(elem => {{
+                let container = elem;
+                while (container && container.parentElement) {{
+                    const text = container.innerText;
+                    if (text && text.length > 50 &&
+                        (text.includes('★') || text.includes('star') || text.includes('ago'))) {{
+                        if (!reviewContainers.includes(container)) {{
+                            reviewContainers.push(container);
+                        }}
+                        break;
+                    }}
+                    container = container.parentElement;
+                }}
+            }});
+
+            // Also try button-based reviews
+            const reviewButtons = document.querySelectorAll(
+                'button[aria-label*="stars"][aria-label*="ago"]'
+            );
+            reviewButtons.forEach(btn => {{
+                const container = btn.closest('[role="article"], div[jslog]');
+                if (container && !reviewContainers.includes(container)) {{
+                    reviewContainers.push(container);
+                }}
+            }});
+
+            // Process each review container
+            reviewContainers.forEach(container => {{
+                if (reviews.length >= maxReviews) return;
+
                 const review = {{}};
 
-                // Author name
-                const authorEl = el.querySelector(
-                    'div.d4r55, span.d4r55, a.WNxzHc, div.TSUbDb a'
-                );
-                if (authorEl) review.author = authorEl.innerText.trim();
-
-                // Star rating
-                const starsEl = el.querySelector(
-                    'span.kvMYJc, span[role="img"][aria-label*="star"]'
-                );
-                if (starsEl) {{
-                    const label = starsEl.getAttribute('aria-label') || '';
-                    const starMatch = label.match(/(\\d+)/);
-                    if (starMatch) review.rating = parseInt(starMatch[1]);
+                // Rating from aria-label
+                const ratingElem = container.querySelector('[aria-label*="star"], [aria-label*="Star"]');
+                if (ratingElem) {{
+                    const label = ratingElem.getAttribute('aria-label');
+                    const ratingMatch = label.match(/(\\d)\\s*[Ss]tar/);
+                    if (ratingMatch) {{
+                        review.rating = parseInt(ratingMatch[1]);
+                    }}
                 }}
 
-                // Review text
-                const textEl = el.querySelector(
-                    'span.wiI7pd, div.MyEned span, div.review-full-text'
-                );
-                if (textEl) review.text = textEl.innerText.trim();
+                // Author and time
+                const authorTimeElems = container.querySelectorAll('div, span');
+                authorTimeElems.forEach(elem => {{
+                    const text = elem.innerText;
+                    if (text && text.includes(' ago') && !review.time) {{
+                        const lines = text.split('\\n');
+                        if (lines.length >= 2) {{
+                            review.author = lines[0].trim();
+                            review.time = lines[1].trim();
+                        }} else if (lines.length === 1) {{
+                            review.time = lines[0].trim();
+                        }}
+                    }}
+                }});
 
-                // Time / relative date
-                const timeEl = el.querySelector(
-                    'span.rsqaWe, span.dehysf, span.review-date'
+                // Review text - look for longest text in jslog elements
+                const textElems = container.querySelectorAll(
+                    'span[jslog], div[jslog], span[class*="review"], div[class*="review"]'
                 );
-                if (timeEl) review.time = timeEl.innerText.trim();
+                let longestText = '';
+                textElems.forEach(elem => {{
+                    const text = elem.innerText;
+                    if (text && text.length > longestText.length &&
+                        !text.includes(' ago') && !text.includes('★')) {{
+                        longestText = text;
+                    }}
+                }});
 
-                // Only include reviews that have at least some content
-                if (review.author || review.text) {{
-                    results.push(review);
+                // Fallback: get all text and filter
+                if (!longestText) {{
+                    const allText = container.innerText;
+                    const lines = allText.split('\\n').filter(line =>
+                        line.length > 20 &&
+                        !line.includes(' ago') &&
+                        !line.includes('★') &&
+                        !line.includes('Google') &&
+                        !line.includes('Local Guide')
+                    );
+                    if (lines.length > 0) {{
+                        longestText = lines.join(' ');
+                    }}
                 }}
-            }}
 
-            return results;
-        }}""")
+                review.text = longestText.trim();
+
+                // Helpful count
+                const helpfulElem = container.querySelector('[aria-label*="Helpful"]');
+                if (helpfulElem) {{
+                    const helpfulMatch = helpfulElem.getAttribute('aria-label').match(/(\\d+)/);
+                    if (helpfulMatch) {{
+                        review.helpful = parseInt(helpfulMatch[1]);
+                    }}
+                }}
+
+                // Only add reviews with meaningful text
+                if (review.text && review.text.length > 10) {{
+                    reviews.push(review);
+                }}
+            }});
+
+            return reviews;
+        }}""", max_reviews)
 
     except Exception as exc:
         logger.warning("Review extraction failed (non-fatal): %s", exc)
@@ -394,32 +707,33 @@ async def scrape_business_from_maps(
     place_id: Optional[str] = None,
     cid: Optional[str] = None,
     business_name: Optional[str] = None,
+    raw_url: Optional[str] = None,
     callback: ProgressCallback = None,
 ) -> BusinessData:
     """
     Scrape a single business from Google Maps and return comprehensive data
     suitable for generating a website.
 
-    The function navigates to the business page using one of:
-    - CID (preferred, most stable identifier)
-    - place_id
-    - business_name (search fallback)
+    The preferred approach is to pass the original Google Maps URL (raw_url)
+    since it contains the data segments that uniquely identify the business
+    and loads the business panel reliably. CID/place_id/name are used as
+    fallbacks for URL construction.
 
     Args:
         place_id: Google Maps place ID (e.g. "ChIJ...")
         cid: Google Maps CID numeric identifier
         business_name: Business name to search for (fallback)
-        callback: Optional async callable for progress updates. Receives dicts
-                  like {"step": "extracting_profile", "message": "Got business name..."}
+        raw_url: The original Google Maps URL pasted by the user (preferred)
+        callback: Optional async callable for progress updates.
 
     Returns:
         BusinessData pydantic model with all extracted fields.
 
     Raises:
-        ValueError: If none of place_id, cid, or business_name are provided.
+        ValueError: If no identifiers are provided.
     """
-    if not any([place_id, cid, business_name]):
-        raise ValueError("At least one of place_id, cid, or business_name must be provided")
+    if not any([place_id, cid, business_name, raw_url]):
+        raise ValueError("At least one of raw_url, place_id, cid, or business_name must be provided")
 
     browser: Optional[Browser] = None
 
@@ -427,18 +741,27 @@ async def scrape_business_from_maps(
         try:
             await _notify(callback, "launching_browser", "Starting headless browser...")
 
+            # Use headed mode (headless=False) so Google Maps serves the full
+            # experience with all tabs (Reviews, Photos, etc.). On production
+            # (Railway), Xvfb provides the virtual display. Falls back to
+            # headless if no display is available (local dev).
+            import os
+            has_display = bool(os.environ.get("DISPLAY"))
+            use_headless = not has_display
+
             browser = await pw.chromium.launch(
-                headless=True,
+                headless=use_headless,
                 args=[
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
                     "--disable-blink-features=AutomationControlled",
-                    "--window-size=1280,720",
+                    "--window-size=1920,1080",
                 ],
             )
 
             context = await browser.new_context(
-                viewport={"width": 1280, "height": 720},
+                viewport={"width": 1920, "height": 1080},
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -448,24 +771,28 @@ async def scrape_business_from_maps(
             )
             page = await context.new_page()
 
-            # Build the navigation URL based on available identifiers
-            if cid:
+            # Build the navigation URL — prefer the original URL since it
+            # contains !1s data segments that reliably load the business panel
+            if raw_url and "google.com/maps" in raw_url:
+                url = raw_url
+                await _notify(callback, "navigating", "Navigating to business via original Maps URL...")
+            elif cid:
                 url = f"https://www.google.com/maps?cid={cid}"
                 await _notify(callback, "navigating", f"Navigating to business via CID: {cid}")
             elif place_id:
                 url = f"https://www.google.com/maps/place/?q=place_id:{place_id}"
                 await _notify(callback, "navigating", f"Navigating to business via place_id: {place_id}")
             else:
-                # Search by name as a fallback
                 from urllib.parse import quote_plus
                 query = quote_plus(business_name)  # type: ignore[arg-type]
                 url = f"https://www.google.com/maps/search/{query}"
                 await _notify(callback, "navigating", f"Searching Google Maps for: {business_name}")
 
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            # Use wait_until='load' — Google Maps SPA needs full JS load
+            await page.goto(url, wait_until="load", timeout=45000)
             await asyncio.sleep(3)
 
-            # Handle cookie consent dialog if it appears (common in EU regions)
+            # Handle cookie consent dialog if it appears
             try:
                 consent_btn = await page.query_selector(
                     'button[aria-label="Accept all"], '
@@ -478,12 +805,11 @@ async def scrape_business_from_maps(
             except Exception:
                 pass
 
-            # If we searched by name, we may land on search results rather than
-            # a single business page. Click the first result if so.
-            if business_name and not cid and not place_id:
+            # If we searched by name, click the first result
+            if not raw_url and business_name and not cid and not place_id:
                 try:
                     first_result = await page.query_selector(
-                        'a.hfpxzc, div.Nv2PK a, a[href*="/maps/place/"]'
+                        '[role="article"], a.hfpxzc, div.Nv2PK a, a[href*="/maps/place/"]'
                     )
                     if first_result:
                         await first_result.click()
@@ -491,23 +817,40 @@ async def scrape_business_from_maps(
                 except Exception:
                     pass
 
-            # Wait for the business profile to load
+            # Wait for the business profile panel to load
             try:
                 await page.wait_for_selector(
-                    "h1.DUwDvf, h1[data-attrid='title'], h1",
+                    'h1[aria-label], h1.DUwDvf, [data-item-id="address"], h1',
                     timeout=10000,
                 )
             except Exception:
                 logger.warning("Business heading not found - page may not have loaded fully")
 
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
+
+            # Scroll the side panel down to load services, reviews button, etc.
+            side_panel = await page.query_selector(
+                'div.m6QErb.DxyBCb, div[role="main"] div.m6QErb, div.bJzME'
+            )
+            if side_panel:
+                for _ in range(3):
+                    try:
+                        await side_panel.evaluate('(el) => el.scrollBy(0, 300)')
+                        await asyncio.sleep(0.5)
+                    except Exception:
+                        break
+                # Scroll back to top for consistent extraction
+                try:
+                    await side_panel.evaluate('(el) => el.scrollTop = 0')
+                    await asyncio.sleep(0.5)
+                except Exception:
+                    pass
 
             # ---- Extract main profile data ----
             await _notify(callback, "extracting_profile", "Extracting business profile data...")
             profile_data = await page.evaluate(EXTRACT_PROFILE_JS)
 
             if not profile_data.get("name"):
-                # Fallback: use the provided business_name or raise
                 if business_name:
                     profile_data["name"] = business_name
                 else:
@@ -522,8 +865,13 @@ async def scrape_business_from_maps(
                 f"Got business name: {profile_data.get('name', 'unknown')}",
             )
 
-            # Try to expand hours if they are collapsed
-            if not profile_data.get("hours"):
+            # Parse hours from aria-label if table hours weren't found
+            hours_dict = profile_data.get("hours")
+            if not hours_dict and profile_data.get("hours_raw"):
+                hours_dict = _parse_hours_from_aria_label(profile_data["hours_raw"])
+
+            # Try expanding hours if still not found
+            if not hours_dict:
                 try:
                     hours_btn = await page.query_selector(
                         '[data-item-id="oh"], '
@@ -533,7 +881,6 @@ async def scrape_business_from_maps(
                     if hours_btn:
                         await hours_btn.click()
                         await asyncio.sleep(1.5)
-                        # Re-extract hours after expanding
                         hours_data = await page.evaluate("""() => {
                             const hours = {};
                             const rows = document.querySelectorAll(
@@ -551,7 +898,7 @@ async def scrape_business_from_maps(
                             return Object.keys(hours).length > 0 ? hours : null;
                         }""")
                         if hours_data:
-                            profile_data["hours"] = hours_data
+                            hours_dict = hours_data
                 except Exception:
                     pass
 
@@ -565,10 +912,8 @@ async def scrape_business_from_maps(
                     f"Found {len(photo_urls)} photos",
                 )
 
-            # Navigate back to the main business page before extracting reviews
-            # (the Photos tab may have changed the view)
+            # Navigate back to main business page before extracting reviews
             if photo_urls:
-                # Click the Overview tab to get back
                 overview_tab = await page.query_selector(
                     'button[aria-label*="Overview"], '
                     'button[data-tab-id="overview"], '
@@ -578,7 +923,6 @@ async def scrape_business_from_maps(
                     await overview_tab.click()
                     await asyncio.sleep(1.5)
                 else:
-                    # Fallback: navigate back to the original URL
                     await page.goto(url, wait_until="domcontentloaded", timeout=15000)
                     await asyncio.sleep(2)
 
@@ -603,7 +947,9 @@ async def scrape_business_from_maps(
                 rating=profile_data.get("rating"),
                 review_count=profile_data.get("review_count"),
                 category=profile_data.get("category"),
-                hours=profile_data.get("hours"),
+                description=profile_data.get("description"),
+                hours=hours_dict if hours_dict else None,
+                hours_raw=profile_data.get("hours_raw"),
                 services=profile_data.get("services"),
                 photos=photo_urls if photo_urls else None,
                 reviews=review_data if review_data else None,
@@ -611,6 +957,13 @@ async def scrape_business_from_maps(
                 longitude=profile_data.get("longitude"),
                 place_id=place_id,
                 cid=cid or profile_data.get("cid"),
+                open_now=profile_data.get("open_now"),
+                status_text=profile_data.get("status_text"),
+                photo_count=profile_data.get("photo_count"),
+                review_topics=profile_data.get("review_topics"),
+                price_info=profile_data.get("price_info"),
+                has_menu=profile_data.get("has_menu"),
+                links=profile_data.get("links"),
             )
 
             await _notify(callback, "complete", f"Successfully scraped: {business.name}")
@@ -631,7 +984,6 @@ if __name__ == "__main__":
     import sys
 
     async def _main() -> None:
-        # Accept either --cid=<value>, --place-id=<value>, or a business name as args
         cid_val: Optional[str] = None
         place_id_val: Optional[str] = None
         name_val: Optional[str] = None
@@ -684,8 +1036,8 @@ if __name__ == "__main__":
 
         if result.photos:
             print(f"\nPhotos ({len(result.photos)}):")
-            for url in result.photos:
-                print(f"  {url[:100]}...")
+            for u in result.photos:
+                print(f"  {u[:100]}...")
 
         if result.reviews:
             print(f"\nReviews ({len(result.reviews)}):")
@@ -696,7 +1048,6 @@ if __name__ == "__main__":
                 if text:
                     print(f"    {text[:120]}{'...' if len(text) > 120 else ''}")
 
-        # Save full JSON output
         import os
         os.makedirs("tmp_scripts", exist_ok=True)
         output_path = "tmp_scripts/maps_business.json"

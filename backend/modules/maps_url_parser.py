@@ -159,7 +159,18 @@ def _extract_cid(url: str) -> Optional[str]:
     if "cid" in qs:
         return qs["cid"][0]
 
-    # Extract from hex-encoded data blob and convert to decimal CID
+    # Extract from hex-encoded data blob and convert to decimal CID.
+    # Prefer CIDs from the !1s segment (the actual place identifier)
+    # over other hex pairs like !5s (which are different data).
+    import re as _re
+    _1s_cid = _re.search(r"!1s(0x[0-9a-fA-F]+:0x([0-9a-fA-F]+))", url)
+    if _1s_cid:
+        try:
+            cid_decimal = str(int(_1s_cid.group(2), 16))
+            return cid_decimal
+        except ValueError:
+            pass
+    # Fallback: use any hex pair
     match = _CID_HEX_PATTERN.search(url)
     if match:
         try:

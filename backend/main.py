@@ -172,6 +172,7 @@ async def run_generation_pipeline(
             place_id=parsed_url.place_id,
             cid=parsed_url.cid,
             business_name=parsed_url.business_name,
+            raw_url=parsed_url.raw_url,
             callback=_scraper_callback,
         )
 
