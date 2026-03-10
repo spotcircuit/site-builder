@@ -1,0 +1,40 @@
+{
+  "hero_headline": "Welcome to Our Business",
+  "hero_subheadline": "Professional services you can trust.",
+  "about_title": "About Us",
+  "about_text": "We are a dedicated team of professionals.",
+  "services": [
+    {"name": "Service One", "description": "Description of service one.", "icon_suggestion": "star"},
+    {"name": "Service Two", "description": "Description of service two.", "icon_suggestion": "heart"}
+  ],
+  "why_choose_us": [],
+  "process_steps": [],
+  "testimonials": [
+    {"author": "John Doe", "rating": 5, "text": "Great service!"}
+  ],
+  "faq_items": [],
+  "cta_headline": "Ready to Get Started?",
+  "cta_button_text": "Contact Us",
+  "tagline": "Trusted by hundreds",
+  "seo_title": "Business Website",
+  "seo_description": "Professional business website",
+  "og_title": "Business Website",
+  "og_description": "Professional business website",
+  "color_primary": "#2563EB",
+  "color_secondary": "#7C3AED",
+  "font_heading": "Inter",
+  "font_body": "Inter",
+  "hero_image_keyword": "business",
+  "business_name": "Test Business",
+  "phone": "(555) 123-4567",
+  "email": "info@test.com",
+  "address": "123 Main St, City, ST 12345",
+  "website": "https://test.com",
+  "hours": null,
+  "photos": [],
+  "latitude": null,
+  "longitude": null,
+  "rating": 4.8,
+  "review_count": 125,
+  "category": "Professional Services"
+}
