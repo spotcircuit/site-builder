@@ -106,10 +106,10 @@ export default function Contact({ data }: { data: any }) {
               </div>
             )}
 
-            {/* Google Maps embed */}
-            {data.latitude && data.longitude && (
+            {/* Google Maps embed — search by name so the business listing is highlighted */}
+            {(data.business_name || data.latitude) && (
               <iframe
-                src={`https://www.google.com/maps?q=${data.latitude},${data.longitude}&z=15&output=embed`}
+                src={`https://www.google.com/maps?q=${encodeURIComponent(data.business_name + (data.address ? ' ' + data.address : ''))}&z=17&output=embed`}
                 width="100%"
                 height="250"
                 style={{ border: 0 }}
