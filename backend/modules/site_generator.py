@@ -198,7 +198,11 @@ copy and sophisticated design choices.
 
 RULES:
 - ALWAYS write all content in English, regardless of the language of the input data. \
-If business data is in another language, translate it to natural English.
+If business data is in another language, translate it to natural English. \
+Keep the original business name as-is (even if in another script/language) but write \
+ALL other content (headlines, about text, service descriptions, FAQs, SEO tags, etc.) \
+in fluent English. If the business category is missing or unclear, infer it from the \
+business name, services, reviews, and other available data.
 - Write in a confident, premium tone appropriate to the business industry.
 - Headlines should be benefit-driven and emotionally compelling (not generic).
 - About text should be 2-3 substantial paragraphs that tell the business story.

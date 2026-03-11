@@ -6,6 +6,9 @@ Includes built-in CDN, DDoS protection, and edge caching.
 
 Requires CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID environment variables.
 Uses `npx wrangler pages deploy` for reliable direct uploads.
+
+Automatically manages project limits by deleting the oldest project
+when the account limit is reached.
 """
 
 import asyncio
@@ -15,6 +18,7 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Optional
 
+import httpx
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -49,6 +53,96 @@ def _sanitize_project_name(business_name: str, job_id: str) -> str:
         slug = "generated-site"
     short_hash = job_id[:6] if job_id else "000000"
     return f"site-{slug}-{short_hash}"
+
+
+async def _ensure_project_exists(
+    project_name: str,
+    token: str,
+    account_id: str,
+    callback: ProgressCallback = None,
+) -> bool:
+    """Ensure a Cloudflare Pages project exists, creating it if needed.
+
+    If the account project limit is reached, deletes the oldest project
+    to make room. Returns True if the project is ready.
+    """
+    api_base = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/pages/projects"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        # Check if project already exists
+        check = await client.get(f"{api_base}/{project_name}", headers=headers)
+        if check.status_code == 200 and check.json().get("success"):
+            logger.info(f"Project '{project_name}' already exists")
+            return True
+
+        # Try to create it
+        create_resp = await client.post(
+            api_base,
+            headers=headers,
+            json={"name": project_name, "production_branch": "main"},
+        )
+        create_data = create_resp.json()
+
+        if create_data.get("success"):
+            logger.info(f"Created project: {project_name}")
+            return True
+
+        # Check if it's a project limit error
+        errors = create_data.get("errors", [])
+        is_limit = any(e.get("code") == 8000027 for e in errors)
+
+        if not is_limit:
+            logger.error(f"Failed to create project: {create_data}")
+            return False
+
+        # Hit project limit — delete the oldest project to make room
+        if callback:
+            await callback("Account project limit reached, removing oldest site...")
+
+        logger.warning("Project limit reached, deleting oldest project")
+
+        list_resp = await client.get(api_base, headers=headers)
+        list_data = list_resp.json()
+        projects = list_data.get("result") or []
+
+        if not projects:
+            logger.error("No projects to delete but limit reached")
+            return False
+
+        # Sort by created_on ascending (oldest first)
+        projects.sort(key=lambda p: p.get("created_on", ""))
+        oldest = projects[0]
+        oldest_name = oldest.get("name", "")
+
+        if callback:
+            await callback(f"Deleting oldest project: {oldest_name}...")
+
+        delete_resp = await client.delete(
+            f"{api_base}/{oldest_name}", headers=headers
+        )
+        delete_data = delete_resp.json()
+
+        if delete_data.get("success"):
+            logger.info(f"Deleted oldest project: {oldest_name}")
+        else:
+            logger.error(f"Failed to delete project {oldest_name}: {delete_data}")
+            return False
+
+        # Now create again
+        retry_resp = await client.post(
+            api_base,
+            headers=headers,
+            json={"name": project_name, "production_branch": "main"},
+        )
+        retry_data = retry_resp.json()
+
+        if retry_data.get("success"):
+            logger.info(f"Created project after cleanup: {project_name}")
+            return True
+
+        logger.error(f"Still failed after cleanup: {retry_data}")
+        return False
 
 
 async def deploy_to_cloudflare(
@@ -90,40 +184,22 @@ async def deploy_to_cloudflare(
         "CLOUDFLARE_ACCOUNT_ID": account_id,
     }
 
-    # Step 1: Ensure project exists via Cloudflare API (faster than wrangler)
+    # Step 1: Ensure project exists (auto-manages project limit)
     if callback:
         await callback(f"Ensuring project '{project_name}' exists...")
 
-    import httpx
-
-    api_base = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/pages/projects"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            # Check if project exists
-            check = await client.get(f"{api_base}/{project_name}", headers=headers)
-            if check.status_code == 404 or not check.json().get("success"):
-                # Create the project
-                create_resp = await client.post(
-                    api_base,
-                    headers=headers,
-                    json={
-                        "name": project_name,
-                        "production_branch": "main",
-                    },
-                )
-                create_data = create_resp.json()
-                if create_data.get("success"):
-                    logger.info(f"Created Cloudflare Pages project: {project_name}")
-                else:
-                    logger.warning(f"Project create response: {create_data}")
-            else:
-                logger.info(f"Cloudflare Pages project '{project_name}' already exists")
-    except Exception as e:
-        logger.warning(f"Project ensure failed (will try deploy anyway): {e}")
+        project_ready = await _ensure_project_exists(
+            project_name, token, account_id, callback
+        )
+        if not project_ready:
+            raise RuntimeError(
+                f"Could not create Cloudflare Pages project '{project_name}'"
+            )
+    except httpx.HTTPError as e:
+        raise RuntimeError(f"Cloudflare API error: {e}")
 
-    # Step 2: Deploy
+    # Step 2: Deploy via wrangler
     cmd = [
         "npx", "wrangler", "pages", "deploy",
         str(dist_path),
@@ -156,27 +232,20 @@ async def deploy_to_cloudflare(
         )
 
     # Extract URL from wrangler output
-    # Typical output: "✨ Deployment complete! Take a peek over at https://xxxxx.project-name.pages.dev"
     url = ""
     deployment_id = ""
     combined = stdout_str + "\n" + stderr_str
 
-    # Look for deployment-specific URL in output
-    # e.g. https://7005caee.joes-pizza-test.pages.dev
     url_match = re.search(r"(https://[a-z0-9.-]+\.pages\.dev)", combined)
     if url_match:
-        # Wrangler returns the deployment-specific URL (with hash prefix)
-        # but we want the stable production URL for the user
         deployment_url = url_match.group(1)
         logger.info(f"Deployment-specific URL: {deployment_url}")
 
-    # Look for deployment ID
     id_match = re.search(r"Deployment ID:\s*([a-f0-9-]+)", combined)
     if id_match:
         deployment_id = id_match.group(1)
 
-    # Always use the stable production URL (no hash prefix)
-    # SSL is immediately available on this URL, unlike deployment-specific ones
+    # Stable production URL
     url = f"https://{project_name}.pages.dev"
 
     if callback:
