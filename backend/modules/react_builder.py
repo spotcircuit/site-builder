@@ -76,18 +76,35 @@ class ReactBuildResult(BaseModel):
     index_html: str  # Content of dist/index.html for preview
 
 
+def _html_escape_attr(value: str) -> str:
+    """Escape a string for safe use inside an HTML attribute value."""
+    return (
+        value.replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
 def _substitute_placeholders(build_dir: Path, content: dict, business_data: dict) -> None:
     """Replace {{PLACEHOLDER}} tokens in template config files."""
     replacements = {
-        "{{SEO_TITLE}}": content.get("seo_title", "Business Website"),
-        "{{SEO_DESCRIPTION}}": content.get("seo_description", "Professional business website"),
-        "{{OG_TITLE}}": content.get("og_title", content.get("seo_title", "Business Website")),
-        "{{OG_DESCRIPTION}}": content.get("og_description", content.get("seo_description", "")),
+        "{{SEO_TITLE}}": _html_escape_attr(content.get("seo_title", "Business Website")),
+        "{{SEO_DESCRIPTION}}": _html_escape_attr(content.get("seo_description", "Professional business website")),
+        "{{OG_TITLE}}": _html_escape_attr(content.get("og_title", content.get("seo_title", "Business Website"))),
+        "{{OG_DESCRIPTION}}": _html_escape_attr(content.get("og_description", content.get("seo_description", ""))),
         "{{COLOR_PRIMARY}}": content.get("color_primary", "#2563EB"),
         "{{COLOR_SECONDARY}}": content.get("color_secondary", "#F59E0B"),
         "{{FONT_HEADING}}": content.get("font_heading", "Inter"),
         "{{FONT_BODY}}": content.get("font_body", "Inter"),
         "{{FAVICON_LETTER}}": business_data.get("name", "B")[0].upper(),
+    }
+
+    # URL-encoded font names for Google Fonts link in index.html
+    font_url_replacements = {
+        "{{FONT_HEADING}}": content.get("font_heading", "Inter").replace(" ", "+"),
+        "{{FONT_BODY}}": content.get("font_body", "Inter").replace(" ", "+"),
     }
 
     # Files that contain placeholders
@@ -102,6 +119,12 @@ def _substitute_placeholders(build_dir: Path, content: dict, business_data: dict
             continue
 
         text = filepath.read_text(encoding="utf-8")
+
+        # For index.html, apply URL-encoded font names first (overrides the raw ones)
+        if filename == "index.html":
+            for placeholder, value in font_url_replacements.items():
+                text = text.replace(placeholder, str(value))
+
         for placeholder, value in replacements.items():
             text = text.replace(placeholder, str(value))
         filepath.write_text(text, encoding="utf-8")
