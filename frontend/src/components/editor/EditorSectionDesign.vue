@@ -2,6 +2,29 @@
   <EditorAccordion title="Design" icon="D" sectionId="hero">
     <div class="space-y-3">
       <p class="text-xs text-amber-400/80">Color and font changes require "Apply Changes" to take effect.</p>
+
+      <!-- Theme Presets -->
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-2">Quick Themes</label>
+        <div class="grid grid-cols-4 gap-2">
+          <button
+            v-for="theme in themes"
+            :key="theme.name"
+            @click="applyTheme(theme)"
+            class="group relative rounded-lg p-1.5 border transition-all hover:scale-105"
+            :class="isActiveTheme(theme) ? 'border-cyan-500 bg-gray-700/50' : 'border-gray-700 hover:border-gray-500'"
+            :title="theme.name"
+          >
+            <div class="flex gap-0.5 mb-1">
+              <div class="w-4 h-4 rounded-sm" :style="{ backgroundColor: theme.primary }"></div>
+              <div class="w-4 h-4 rounded-sm" :style="{ backgroundColor: theme.secondary }"></div>
+            </div>
+            <span class="text-[10px] text-gray-400 group-hover:text-white block truncate">{{ theme.name }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Color Pickers -->
       <div class="grid grid-cols-2 gap-3">
         <div>
           <label class="block text-xs font-medium text-gray-400 mb-1">Primary Color</label>
@@ -36,6 +59,8 @@
           </div>
         </div>
       </div>
+
+      <!-- Font Selectors -->
       <div class="grid grid-cols-2 gap-3">
         <div>
           <label class="block text-xs font-medium text-gray-400 mb-1">Heading Font</label>
@@ -67,6 +92,45 @@ import { useSiteBuilderStore } from '../../stores/siteBuilderStore'
 import EditorAccordion from './EditorAccordion.vue'
 
 const store = useSiteBuilderStore()
+
+interface Theme {
+  name: string
+  primary: string
+  secondary: string
+  fontHeading: string
+  fontBody: string
+}
+
+const themes: Theme[] = [
+  { name: 'Ocean', primary: '#2563EB', secondary: '#0EA5E9', fontHeading: 'Inter', fontBody: 'Inter' },
+  { name: 'Forest', primary: '#059669', secondary: '#10B981', fontHeading: 'Lora', fontBody: 'Source Sans Pro' },
+  { name: 'Sunset', primary: '#DC2626', secondary: '#F59E0B', fontHeading: 'Montserrat', fontBody: 'Open Sans' },
+  { name: 'Royal', primary: '#7C3AED', secondary: '#A855F7', fontHeading: 'Playfair Display', fontBody: 'Lato' },
+  { name: 'Slate', primary: '#334155', secondary: '#64748B', fontHeading: 'Space Grotesk', fontBody: 'DM Sans' },
+  { name: 'Coral', primary: '#F43F5E', secondary: '#FB923C', fontHeading: 'Poppins', fontBody: 'Nunito' },
+  { name: 'Teal', primary: '#0D9488', secondary: '#2DD4BF', fontHeading: 'Manrope', fontBody: 'Inter' },
+  { name: 'Gold', primary: '#B45309', secondary: '#D97706', fontHeading: 'Merriweather', fontBody: 'Work Sans' },
+  { name: 'Navy', primary: '#1E3A5F', secondary: '#2563EB', fontHeading: 'Raleway', fontBody: 'Roboto' },
+  { name: 'Rose', primary: '#BE185D', secondary: '#EC4899', fontHeading: 'Outfit', fontBody: 'Sora' },
+  { name: 'Olive', primary: '#4D7C0F', secondary: '#84CC16', fontHeading: 'Crimson Text', fontBody: 'Rubik' },
+  { name: 'Midnight', primary: '#1E1B4B', secondary: '#4338CA', fontHeading: 'Space Grotesk', fontBody: 'Inter' },
+]
+
+function applyTheme(theme: Theme) {
+  store.updateEditableField('color_primary', theme.primary)
+  store.updateEditableField('color_secondary', theme.secondary)
+  store.updateEditableField('font_heading', theme.fontHeading)
+  store.updateEditableField('font_body', theme.fontBody)
+}
+
+function isActiveTheme(theme: Theme): boolean {
+  const d = store.editableData
+  if (!d) return false
+  return d.color_primary === theme.primary
+    && d.color_secondary === theme.secondary
+    && d.font_heading === theme.fontHeading
+    && d.font_body === theme.fontBody
+}
 
 const fonts = [
   'Inter', 'Montserrat', 'Poppins', 'Raleway', 'Playfair Display',
