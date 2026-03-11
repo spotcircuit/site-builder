@@ -3,8 +3,18 @@ import { test, expect } from '@playwright/test'
 const FRONTEND = 'http://localhost:5177'
 const BACKEND = 'http://localhost:9405'
 
-// Use env var for Maps URL, fallback to a stable well-known business
-const TEST_MAPS_URL = process.env.TEST_MAPS_URL || 'https://www.google.com/maps/place/The+Fix+Clinic/@30.347416,-97.7593128,17z'
+// Rotate through different businesses to test variety
+const TEST_URLS = [
+  'https://www.google.com/maps/place/The+Fix+Clinic/@30.347416,-97.7593128,17z',
+  'https://www.google.com/maps/place/Starbucks/@38.8976763,-77.0365298,17z',
+  'https://www.google.com/maps/place/Joe%27s+Pizza/@40.7305067,-73.9938438,17z',
+  'https://www.google.com/maps/place/The+UPS+Store/@33.4483771,-112.0740373,17z',
+  'https://www.google.com/maps/place/Supercuts/@37.7749295,-122.4194155,17z',
+]
+// Use env var, or pick a random URL from the pool
+const TEST_MAPS_URL = process.env.TEST_MAPS_URL || TEST_URLS[Math.floor(Math.random() * TEST_URLS.length)]
+
+console.log(`[E2E] Selected test URL: ${TEST_MAPS_URL}`)
 
 // These tests are SLOW (3-5 min) — only run with: npx playwright test e2e/full-generation.spec.ts
 test.describe('Site Builder - Full Generation E2E', () => {

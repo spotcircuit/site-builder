@@ -119,6 +119,12 @@ class SiteContent(BaseModel):
     og_description: str = Field(
         default="", description="Open Graph description for social sharing"
     )
+    og_image: str = Field(
+        default="", description="Open Graph image URL for social sharing previews"
+    )
+    canonical_url: str = Field(
+        default="", description="Canonical URL for SEO (prevents duplicate content)"
+    )
     # Social proof
     tagline: str = Field(
         default="", description="Short tagline for the social proof bar"

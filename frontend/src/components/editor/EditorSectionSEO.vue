@@ -45,6 +45,25 @@
           class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-600 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
         ></textarea>
       </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">OG Image URL</label>
+        <input
+          :value="store.editableData?.og_image || ''"
+          @input="store.updateEditableField('og_image', ($event.target as HTMLInputElement).value)"
+          placeholder="https://example.com/image.jpg"
+          class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-600 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500"
+        />
+        <p class="text-xs text-gray-500 mt-1">Recommended: 1200x630px for best social sharing</p>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1">Canonical URL</label>
+        <input
+          :value="store.editableData?.canonical_url || ''"
+          @input="store.updateEditableField('canonical_url', ($event.target as HTMLInputElement).value)"
+          placeholder="https://yourdomain.com"
+          class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-600 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500"
+        />
+      </div>
     </div>
   </EditorAccordion>
 </template>
