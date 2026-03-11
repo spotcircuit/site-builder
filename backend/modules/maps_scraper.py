@@ -837,13 +837,36 @@ async def scrape_business_from_maps(
             except Exception:
                 pass
 
-            # If search returned a list instead of auto-resolving, click first result
+            # If search returned a list instead of auto-resolving, click first
+            # NON-SPONSORED result. Sponsored listings appear at the top with
+            # a "Sponsored" label and should be skipped.
             try:
-                first_result = await page.query_selector(
-                    '[role="article"], a.hfpxzc, div.Nv2PK a'
+                results = await page.query_selector_all(
+                    '[role="article"], a.hfpxzc, div.Nv2PK'
                 )
-                if first_result:
-                    await first_result.click()
+                clicked = False
+                for result in results:
+                    # Check if this result or its parent contains "Sponsored" text
+                    is_sponsored = await result.evaluate("""(el) => {
+                        const text = el.innerText || '';
+                        const parent = el.closest('[role="article"]') || el.parentElement;
+                        const parentText = parent ? (parent.innerText || '') : '';
+                        const combined = text + ' ' + parentText;
+                        return combined.includes('Sponsored') ||
+                               combined.includes('sponsored') ||
+                               combined.includes('Ad ·') ||
+                               combined.includes('Реклама');
+                    }""")
+                    if not is_sponsored:
+                        link = await result.query_selector('a') if await result.get_attribute('href') is None else result
+                        await (link or result).click()
+                        clicked = True
+                        await asyncio.sleep(4)
+                        break
+                # Fallback: if all results look sponsored, click the first one anyway
+                if not clicked and results:
+                    first_link = await results[0].query_selector('a') or results[0]
+                    await first_link.click()
                     await asyncio.sleep(4)
             except Exception:
                 pass
