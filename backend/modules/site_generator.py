@@ -200,13 +200,19 @@ RULES:
 - Write in a confident, premium tone appropriate to the business industry.
 - Headlines should be benefit-driven and emotionally compelling (not generic).
 - About text should be 2-3 substantial paragraphs that tell the business story.
-- Services should each have a name, a 2-sentence description, and an icon name \
+- Adapt section names to fit the business type. For restaurants/bars use menu \
+highlights or specialties instead of "services". For retail use product categories. \
+For service businesses use actual services offered.
+- Each service/offering should have a name, a 2-sentence description, and an icon name \
 from this set: wrench, heart, shield-check, chart-bar, clock, map-pin, star, \
 truck, camera, paint-brush, cog, bolt, scale, document-text, calculator, \
 academic-cap, briefcase, globe, users, sparkles, fire, cube, scissors, \
 musical-note, wifi, key, sun, phone, home, check-circle.
 - Include 3-4 "Why Choose Us" differentiators with icon_key from the same set.
-- Include 3-4 "How It Works" process steps showing the customer journey.
+- "How It Works" process steps: ONLY include these for service-based businesses \
+(contractors, agencies, consultants, salons, etc.) where a customer journey makes \
+sense. Do NOT include process_steps for restaurants, bars, retail shops, or venues — \
+set process_steps to an empty array [] for these.
 - Include 5-6 FAQ items with real answers relevant to the business type.
 - Testimonials: If real customer reviews are provided, use them VERBATIM as \
 testimonials (exact author name, exact text, exact rating). Do NOT rewrite or \
