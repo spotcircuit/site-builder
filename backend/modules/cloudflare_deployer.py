@@ -90,19 +90,38 @@ async def deploy_to_cloudflare(
         "CLOUDFLARE_ACCOUNT_ID": account_id,
     }
 
-    # Step 1: Ensure project exists (wrangler doesn't auto-create)
+    # Step 1: Ensure project exists via Cloudflare API (faster than wrangler)
     if callback:
         await callback(f"Ensuring project '{project_name}' exists...")
 
-    create_proc = await asyncio.create_subprocess_exec(
-        "npx", "wrangler", "pages", "project", "create",
-        project_name, "--production-branch=main",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-    )
-    await asyncio.wait_for(create_proc.communicate(), timeout=30)
-    # Ignore errors — project may already exist
+    import httpx
+
+    api_base = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/pages/projects"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            # Check if project exists
+            check = await client.get(f"{api_base}/{project_name}", headers=headers)
+            if check.status_code == 404 or not check.json().get("success"):
+                # Create the project
+                create_resp = await client.post(
+                    api_base,
+                    headers=headers,
+                    json={
+                        "name": project_name,
+                        "production_branch": "main",
+                    },
+                )
+                create_data = create_resp.json()
+                if create_data.get("success"):
+                    logger.info(f"Created Cloudflare Pages project: {project_name}")
+                else:
+                    logger.warning(f"Project create response: {create_data}")
+            else:
+                logger.info(f"Cloudflare Pages project '{project_name}' already exists")
+    except Exception as e:
+        logger.warning(f"Project ensure failed (will try deploy anyway): {e}")
 
     # Step 2: Deploy
     cmd = [
