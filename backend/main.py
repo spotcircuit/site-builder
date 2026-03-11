@@ -386,30 +386,57 @@ async def run_generation_pipeline(
 
                 dist_path = Path(build_result.dist_path)
 
+                deploy_result = None
+
                 if resolved_target == "cloudflare":
-                    deploy_result = await deploy_to_cloudflare(
-                        dist_path=dist_path,
-                        business_name=business_data.name,
-                        job_id=job_id,
-                        callback=_deploy_callback,
+                    try:
+                        deploy_result = await deploy_to_cloudflare(
+                            dist_path=dist_path,
+                            business_name=business_data.name,
+                            job_id=job_id,
+                            callback=_deploy_callback,
+                        )
+                    except Exception as cf_exc:
+                        print(f"[Pipeline] Cloudflare deploy failed, trying Vercel: {cf_exc}")
+                        await _deploy_callback(f"Cloudflare failed, falling back to Vercel...")
+                        if is_vercel_configured():
+                            deploy_result = await deploy_to_vercel(
+                                dist_path=dist_path,
+                                business_name=business_data.name,
+                                job_id=job_id,
+                                callback=_deploy_callback,
+                            )
+                elif resolved_target == "vercel":
+                    try:
+                        deploy_result = await deploy_to_vercel(
+                            dist_path=dist_path,
+                            business_name=business_data.name,
+                            job_id=job_id,
+                            callback=_deploy_callback,
+                        )
+                    except Exception as v_exc:
+                        print(f"[Pipeline] Vercel deploy failed, trying Cloudflare: {v_exc}")
+                        await _deploy_callback(f"Vercel failed, falling back to Cloudflare...")
+                        if is_cloudflare_configured():
+                            deploy_result = await deploy_to_cloudflare(
+                                dist_path=dist_path,
+                                business_name=business_data.name,
+                                job_id=job_id,
+                                callback=_deploy_callback,
+                            )
+
+                if deploy_result:
+                    jobs[job_id]["result"]["deploy_url"] = deploy_result.url
+                    jobs[job_id]["result"]["deploy_provider"] = deploy_result.provider
+
+                    await ws_manager.broadcast_step(
+                        step="deploying",
+                        status="completed",
+                        message=f"Deployed to {deploy_result.url}",
+                        data={"job_id": job_id, "url": deploy_result.url},
                     )
                 else:
-                    deploy_result = await deploy_to_vercel(
-                        dist_path=dist_path,
-                        business_name=business_data.name,
-                        job_id=job_id,
-                        callback=_deploy_callback,
-                    )
-
-                jobs[job_id]["result"]["deploy_url"] = deploy_result.url
-                jobs[job_id]["result"]["deploy_provider"] = deploy_result.provider
-
-                await ws_manager.broadcast_step(
-                    step="deploying",
-                    status="completed",
-                    message=f"Deployed to {deploy_result.url}",
-                    data={"job_id": job_id, "url": deploy_result.url},
-                )
+                    raise RuntimeError("Both deploy providers failed")
 
             except Exception as deploy_exc:
                 print(f"[Pipeline] Deploy failed (non-fatal): {deploy_exc}")
