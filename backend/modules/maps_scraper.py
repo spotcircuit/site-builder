@@ -712,20 +712,34 @@ async def scrape_business_from_maps(
             has_display = bool(os.environ.get("DISPLAY"))
             use_headless = not has_display
 
-            # ── Use persistent context ──
+            # ── Use persistent context with per-job copy ──
             # launch_persistent_context saves cookies/profile across runs.
             # This is CRITICAL: Google Maps shows the full experience (Reviews,
             # Photos, Menu tabs) only when the browser has an established Google
             # session. Without it, Maps serves a "limited view" with only
             # Overview + About tabs. The persistent profile stores the consent
             # cookies from visiting google.com first.
-            profile_dir = os.path.join(
+            #
+            # To support concurrent scrapes, we copy the base profile to a
+            # unique temp directory per job so multiple Chromium instances
+            # don't fight over the SingletonLock.
+            import shutil
+            import tempfile
+
+            base_profile_dir = os.path.join(
                 os.path.dirname(os.path.dirname(__file__)),
                 ".chrome-profile",
             )
+            # Create base profile dir if it doesn't exist yet
+            os.makedirs(base_profile_dir, exist_ok=True)
+
+            # Copy base profile to a temp dir for this scrape job
+            job_profile_dir = tempfile.mkdtemp(prefix="chrome_profile_")
+            if os.listdir(base_profile_dir):
+                shutil.copytree(base_profile_dir, job_profile_dir, dirs_exist_ok=True)
 
             context = await pw.chromium.launch_persistent_context(
-                profile_dir,
+                job_profile_dir,
                 headless=use_headless,
                 args=[
                     "--no-sandbox",
@@ -1002,6 +1016,9 @@ async def scrape_business_from_maps(
         finally:
             if context:
                 await context.close()
+            # Clean up temp profile directory
+            if job_profile_dir and os.path.exists(job_profile_dir):
+                shutil.rmtree(job_profile_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
