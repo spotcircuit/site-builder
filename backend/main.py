@@ -245,6 +245,13 @@ async def run_generation_pipeline(
             callback=_generator_callback,
         )
 
+        # Use AI-inferred category if scraper didn't find one
+        content_dict = content.model_dump()
+        inferred_cat = content_dict.get("inferred_category", "")
+        if not business_data.category and inferred_cat:
+            business_data.category = inferred_cat
+            biz_dict["category"] = inferred_cat
+
         await ws_manager.broadcast_step(
             step="generating_content",
             status="completed",

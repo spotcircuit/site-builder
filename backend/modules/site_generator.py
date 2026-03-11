@@ -140,6 +140,10 @@ class SiteContent(BaseModel):
     hero_image_keyword: str = Field(
         default="", description="Unsplash keyword for hero background if no photos"
     )
+    # AI-inferred category (used when scraper can't detect one)
+    inferred_category: str = Field(
+        default="", description="Business category inferred by AI (e.g. 'SPA Hotel')"
+    )
 
 
 class DeployResult(BaseModel):
@@ -269,7 +273,8 @@ You MUST respond with a single JSON object (no markdown fences, no preamble):
   "color_secondary": "#hex",
   "font_heading": "Google Font Name",
   "font_body": "Google Font Name",
-  "hero_image_keyword": "string (unsplash search term for hero bg)"
+  "hero_image_keyword": "string (unsplash search term for hero bg)",
+  "inferred_category": "string (business category in English, e.g. 'SPA Hotel', 'Italian Restaurant', 'Dental Clinic')"
 }
 
 Return ONLY valid JSON. No extra keys, no wrapping, no explanation."""
