@@ -8,6 +8,8 @@ export default function Contact({ data }: { data: any }) {
     alert('Thank you for your message! We will get back to you soon.')
   }
 
+  const contactImage = data.ai_contact_image || null
+
   return (
     <section
       id="contact"
@@ -22,6 +24,17 @@ export default function Contact({ data }: { data: any }) {
           </h2>
           <div className="w-20 h-1 bg-primary mx-auto rounded-full" />
         </div>
+
+        {/* Contact banner image */}
+        {contactImage && (
+          <div className="rounded-2xl overflow-hidden shadow-xl mb-12">
+            <img
+              src={contactImage}
+              alt="Visit us"
+              className="w-full h-64 object-cover"
+            />
+          </div>
+        )}
 
         {/* Two-column layout */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12">

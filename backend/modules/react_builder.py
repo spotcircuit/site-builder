@@ -158,6 +158,12 @@ def _generate_data_json(
             data["ai_gallery_images"] = [
                 f"/images/{img}" for img in generated_images["gallery_images"]
             ]
+        if generated_images.get("services_image"):
+            data["ai_services_image"] = f"/images/{generated_images['services_image']}"
+        if generated_images.get("why_choose_us_image"):
+            data["ai_why_choose_us_image"] = f"/images/{generated_images['why_choose_us_image']}"
+        if generated_images.get("contact_image"):
+            data["ai_contact_image"] = f"/images/{generated_images['contact_image']}"
 
     return data
 

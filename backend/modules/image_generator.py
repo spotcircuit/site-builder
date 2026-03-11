@@ -36,6 +36,9 @@ class ImageGenerationResult(BaseModel):
     hero_image: Optional[str] = Field(default=None, description="Filename of hero background image")
     about_image: Optional[str] = Field(default=None, description="Filename of about section image")
     gallery_images: list[str] = Field(default_factory=list, description="Filenames of gallery images")
+    services_image: Optional[str] = Field(default=None, description="Filename of services section image")
+    why_choose_us_image: Optional[str] = Field(default=None, description="Filename of why choose us section image")
+    contact_image: Optional[str] = Field(default=None, description="Filename of contact section image")
     image_dir: Optional[str] = Field(default=None, description="Directory where images are saved")
 
 
@@ -76,6 +79,35 @@ def _build_gallery_prompt(business_name: str, category: str, index: int) -> str:
     return (
         f"{angle} of a {category} business environment. Professional photography, "
         f"natural lighting, warm tones, high detail. No text, no logos. Photorealistic."
+    )
+
+
+def _build_services_prompt(business_name: str, category: str) -> str:
+    """Build a prompt for the services section image."""
+    return (
+        f"A professional photograph showcasing the services of a {category} business. "
+        f"The image shows tools, equipment, or the work environment that represents "
+        f"quality service delivery. Clean composition, professional lighting, warm tones. "
+        f"No text, no logos, no faces. Photorealistic editorial style."
+    )
+
+
+def _build_why_choose_us_prompt(business_name: str, category: str) -> str:
+    """Build a prompt for the why choose us section image."""
+    return (
+        f"A confident, trustworthy photograph representing excellence in {category}. "
+        f"Shows attention to detail, quality craftsmanship, or a premium environment "
+        f"that conveys reliability and expertise. Warm natural lighting, shallow depth "
+        f"of field. No text, no logos, no faces. Photorealistic."
+    )
+
+
+def _build_contact_prompt(business_name: str, category: str) -> str:
+    """Build a prompt for the contact section image."""
+    return (
+        f"A welcoming, inviting exterior or entrance photograph of a {category} business "
+        f"location. The scene is warm and approachable with good curb appeal, natural "
+        f"daylight, and a friendly atmosphere. No text, no logos, no faces. Photorealistic."
     )
 
 
@@ -195,19 +227,60 @@ async def generate_site_images(
         if hero_path:
             result.hero_image = hero_path
 
-    # Generate about section image
-    if callback:
-        await callback("Generating about section image...")
+    # ── Section images (always generated — these sections have no real photos) ──
 
-    about_prompt = _build_about_prompt(business_name, category)
-    about_path = await _generate_and_save(
-        prompt=about_prompt,
-        filename="about.png",
-        section="about",
+    # About section image (only if no Google Maps photos to use)
+    if not has_photos:
+        if callback:
+            await callback("Generating about section image...")
+        about_prompt = _build_about_prompt(business_name, category)
+        about_path = await _generate_and_save(
+            prompt=about_prompt,
+            filename="about.png",
+            section="about",
+            aspect_ratio="4:3",
+        )
+        if about_path:
+            result.about_image = about_path
+
+    # Services section image
+    if callback:
+        await callback("Generating services image...")
+    services_prompt = _build_services_prompt(business_name, category)
+    services_path = await _generate_and_save(
+        prompt=services_prompt,
+        filename="services.png",
+        section="services",
         aspect_ratio="4:3",
     )
-    if about_path:
-        result.about_image = about_path
+    if services_path:
+        result.services_image = services_path
+
+    # Why Choose Us section image
+    if callback:
+        await callback("Generating why-choose-us image...")
+    why_prompt = _build_why_choose_us_prompt(business_name, category)
+    why_path = await _generate_and_save(
+        prompt=why_prompt,
+        filename="why-choose-us.png",
+        section="why-choose-us",
+        aspect_ratio="4:3",
+    )
+    if why_path:
+        result.why_choose_us_image = why_path
+
+    # Contact section image
+    if callback:
+        await callback("Generating contact image...")
+    contact_prompt = _build_contact_prompt(business_name, category)
+    contact_path = await _generate_and_save(
+        prompt=contact_prompt,
+        filename="contact.png",
+        section="contact",
+        aspect_ratio="16:9",
+    )
+    if contact_path:
+        result.contact_image = contact_path
 
     # Generate gallery images (only if no Google Maps photos)
     if not has_photos:
