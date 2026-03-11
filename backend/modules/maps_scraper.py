@@ -137,31 +137,40 @@ EXTRACT_PROFILE_JS = """() => {
         }
     } catch {}
 
-    // Category - try specific selectors, then look for text with · or ending patterns
+    // Category - try specific selectors for the category button in the header area
     let categoryText = '';
     const catElem = document.querySelector('button.DkEaL') ||
                     document.querySelector('button[jsaction*="pane.rating.category"]') ||
-                    document.querySelector('[data-value="category"]') ||
-                    document.querySelector('span[class*="category"]');
+                    document.querySelector('[data-value="category"]');
     if (catElem) {
         categoryText = catElem.innerText || '';
     }
     if (!categoryText) {
-        // Look for buttons/spans that contain category-like text
-        // Category appears as "Latin American restaurant·" or similar
-        const candidates = document.querySelectorAll('button, span, a');
-        for (const el of candidates) {
-            const t = (el.innerText || '').trim();
-            // Match text containing · (middle dot) or ending with common category words
-            if (t && t.length > 3 && t.length < 60 &&
-                !t.includes('star') && !t.includes('review') &&
-                !t.includes('Directions') && !t.includes('Save') &&
-                (t.includes('·') || t.includes('\\u00b7') ||
-                 t.endsWith('restaurant') || t.endsWith('bar') ||
-                 t.endsWith('shop') || t.endsWith('store') ||
-                 t.endsWith('service') || t.endsWith('salon'))) {
-                categoryText = t;
-                break;
+        // Fallback: look in the header/info area only (not the whole page)
+        // The category appears near the rating stars, inside the main info panel
+        const headerArea = document.querySelector('div[role="main"] div.fontBodyMedium') ||
+                           document.querySelector('div[role="main"]');
+        if (headerArea) {
+            const candidates = headerArea.querySelectorAll('button, span');
+            for (const el of candidates) {
+                const t = (el.innerText || '').trim();
+                // Category is typically a short single-line text near the top
+                if (t && t.length > 3 && t.length < 50 &&
+                    !t.includes('\\n') &&
+                    !t.includes('star') && !t.includes('review') &&
+                    !t.includes('Directions') && !t.includes('Save') &&
+                    !t.includes('Send') && !t.includes('Share') &&
+                    !t.includes('Sponsored') && !t.includes('Ad') &&
+                    !t.includes('Open') && !t.includes('Close') &&
+                    !t.includes('hour') && !t.includes('mile') &&
+                    !/^[\\d.,]+$/.test(t)) {
+                    // Check if it looks like a category (contains a middle dot or known suffix)
+                    if (t.includes('·') || t.includes('\\u00b7') ||
+                        /\\b(restaurant|bar|hotel|spa|shop|store|salon|clinic|hospital|gym|studio|cafe|bakery|agency|school|church|museum|theater|theatre|pharmacy|dentist|doctor|lawyer|plumber|electrician)\\b/i.test(t)) {
+                        categoryText = t;
+                        break;
+                    }
+                }
             }
         }
     }
