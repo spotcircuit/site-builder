@@ -39,6 +39,7 @@
       >
         <iframe
           v-if="previewHtml"
+          ref="iframeEl"
           :srcdoc="previewHtml"
           class="w-full bg-white"
           :style="{ height: frameHeight, border: 'none' }"
@@ -53,11 +54,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useSiteBuilderStore } from '../stores/siteBuilderStore'
 
 const props = defineProps<{ html: string | null }>()
 const store = useSiteBuilderStore()
+const iframeEl = ref<HTMLIFrameElement | null>(null)
+
+// Expose iframe ref to store for Quick Preview postMessage
+watch(iframeEl, (el) => {
+  store.iframeRef = el
+})
+
+onMounted(() => {
+  if (iframeEl.value) {
+    store.iframeRef = iframeEl.value
+  }
+})
 
 const devices = [
   { key: 'desktop' as const, label: 'Desktop', icon: '🖥️' },
@@ -92,6 +105,16 @@ document.addEventListener('click', function(e) {
 });
 // Also intercept form submissions
 document.addEventListener('submit', function(e) { e.preventDefault(); });
+// Scroll to section when editor accordion is opened
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'SCROLL_TO_SECTION' && e.data.sectionId) {
+    var el = document.getElementById(e.data.sectionId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  if (e.data && e.data.type === 'QUICK_PREVIEW' && e.data.payload) {
+    // Quick preview handled by React's own listener if present
+  }
+});
 <\/script>`
 
 const previewHtml = computed(() => {

@@ -376,6 +376,90 @@ async def build_react_site(
         raise
 
 
+async def rebuild_react_site(
+    data: dict,
+    build_dir: str,
+    callback: ProgressCallback = None,
+) -> ReactBuildResult:
+    """Re-build an existing React site with updated data.json.
+
+    Much faster than full build_react_site() because it skips:
+    - Template copy (build_dir already has everything)
+    - npm install (node_modules already present)
+    Only writes new data.json, re-substitutes placeholders, and re-runs npm build.
+
+    Args:
+        data: The full data.json payload (merged content + business data)
+        build_dir: Path to existing build directory from initial generation
+        callback: Optional progress callback
+
+    Returns:
+        ReactBuildResult with updated HTML
+    """
+    build_path = Path(build_dir)
+
+    if not build_path.exists():
+        raise RuntimeError(f"Build directory not found: {build_dir}")
+
+    if callback:
+        await callback("Updating site data...")
+
+    # Write updated data.json
+    data_json_path = build_path / "src" / "data.json"
+    data_json_path.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    # Re-substitute placeholders (colors/fonts may have changed)
+    if callback:
+        await callback("Applying design changes...")
+
+    # Re-copy template config files first so placeholders are fresh
+    for fname in ("index.html", "tailwind.config.js"):
+        template_file = TEMPLATE_DIR / fname
+        if template_file.exists():
+            shutil.copy2(template_file, build_path / fname)
+
+    # Build a content-like dict from data for placeholder substitution
+    content_for_placeholders = {
+        "seo_title": data.get("seo_title", "Business Website"),
+        "seo_description": data.get("seo_description", ""),
+        "og_title": data.get("og_title", data.get("seo_title", "")),
+        "og_description": data.get("og_description", data.get("seo_description", "")),
+        "color_primary": data.get("color_primary", "#2563EB"),
+        "color_secondary": data.get("color_secondary", "#F59E0B"),
+        "font_heading": data.get("font_heading", "Inter"),
+        "font_body": data.get("font_body", "Inter"),
+    }
+    business_for_placeholders = {"name": data.get("business_name", "Business")}
+    _substitute_placeholders(build_path, content_for_placeholders, business_for_placeholders)
+
+    # Re-build
+    if callback:
+        await callback("Rebuilding site (npm run build)...")
+
+    await _run_command(["npm", "run", "build"], build_path, timeout=90)
+
+    # Inline assets for preview
+    dist_path = build_path / "dist"
+    index_html_path = dist_path / "index.html"
+
+    if not index_html_path.exists():
+        raise RuntimeError(f"Rebuild succeeded but dist/index.html not found")
+
+    index_html = _inline_assets(dist_path, index_html_path)
+
+    if callback:
+        await callback("Site rebuilt successfully!")
+
+    return ReactBuildResult(
+        dist_path=str(dist_path),
+        build_dir=str(build_path),
+        index_html=index_html,
+    )
+
+
 def cleanup_build(build_dir: str) -> None:
     """Remove a temporary build directory after deployment."""
     path = Path(build_dir)

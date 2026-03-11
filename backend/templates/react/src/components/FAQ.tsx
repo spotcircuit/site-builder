@@ -9,6 +9,7 @@ export default function FAQ({ data }: { data: any }) {
 
   return (
     <section
+      id="faq"
       ref={sectionRef}
       className="bg-gray-50 py-20 px-4"
     >

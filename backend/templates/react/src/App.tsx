@@ -1,7 +1,6 @@
+import { useState, useEffect } from 'react'
 import _data from './data.json'
 
-// Cast to any so TS doesn't complain about fields added at build time
-const data = _data as any
 import Navbar from './components/Navbar'
 import Hero from './components/Hero'
 import SocialProof from './components/SocialProof'
@@ -18,6 +17,23 @@ import Footer from './components/Footer'
 import LocalBusinessSchema from './components/LocalBusinessSchema'
 
 function App() {
+  // Quick Preview: accept live data updates via postMessage from parent editor
+  const [data, setData] = useState(_data as any)
+
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.data?.type === 'QUICK_PREVIEW' && event.data.payload) {
+        setData(event.data.payload)
+      }
+      if (event.data?.type === 'SCROLL_TO_SECTION' && event.data.sectionId) {
+        const el = document.getElementById(event.data.sectionId)
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [])
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 antialiased font-body">
       <LocalBusinessSchema data={data} />

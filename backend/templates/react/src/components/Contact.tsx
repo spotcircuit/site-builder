@@ -1,11 +1,13 @@
+import { useState } from 'react'
 import { useScrollAnimation } from '../hooks/useScrollAnimation'
 
 export default function Contact({ data }: { data: any }) {
   const sectionRef = useScrollAnimation()
+  const [submitted, setSubmitted] = useState(false)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    alert('Thank you for your message! We will get back to you soon.')
+    setSubmitted(true)
   }
 
   const contactImage = data.ai_contact_image || null
@@ -140,50 +142,68 @@ export default function Contact({ data }: { data: any }) {
               Send Us a Message
             </h3>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <div>
-                <input
-                  type="text"
-                  placeholder="Your Name"
-                  required
-                  className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white transition"
-                />
+            {submitted ? (
+              <div className="text-center py-12 space-y-3">
+                <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto">
+                  <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <p className="text-lg font-semibold text-gray-800">Thank you!</p>
+                <p className="text-gray-600">We'll get back to you soon.</p>
+                <button
+                  onClick={() => setSubmitted(false)}
+                  className="mt-4 text-sm text-primary hover:underline"
+                >
+                  Send another message
+                </button>
               </div>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div>
+                  <input
+                    type="text"
+                    placeholder="Your Name"
+                    required
+                    className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white transition"
+                  />
+                </div>
 
-              <div>
-                <input
-                  type="email"
-                  placeholder="Your Email"
-                  required
-                  className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white transition"
-                />
-              </div>
+                <div>
+                  <input
+                    type="email"
+                    placeholder="Your Email"
+                    required
+                    className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white transition"
+                  />
+                </div>
 
-              <div>
-                <input
-                  type="tel"
-                  placeholder="Your Phone"
-                  className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white transition"
-                />
-              </div>
+                <div>
+                  <input
+                    type="tel"
+                    placeholder="Your Phone"
+                    className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white transition"
+                  />
+                </div>
 
-              <div>
-                <textarea
-                  placeholder="Your Message"
-                  rows={4}
-                  required
-                  className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white transition resize-none"
-                />
-              </div>
+                <div>
+                  <textarea
+                    placeholder="Your Message"
+                    rows={4}
+                    required
+                    className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-white transition resize-none"
+                  />
+                </div>
 
-              <button
-                type="submit"
-                className="w-full py-3 rounded-lg text-white font-semibold hover:opacity-90 transition"
-                style={{ backgroundColor: data.color_primary || '#2563eb' }}
-              >
-                Send Message
-              </button>
-            </form>
+                <button
+                  type="submit"
+                  className="w-full py-3 rounded-lg text-white font-semibold hover:opacity-90 transition"
+                  style={{ backgroundColor: data.color_primary || '#2563eb' }}
+                >
+                  Send Message
+                </button>
+              </form>
+            )}
           </div>
         </div>
       </div>

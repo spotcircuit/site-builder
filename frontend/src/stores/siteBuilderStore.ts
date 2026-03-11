@@ -1,6 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref, reactive, computed } from 'vue'
-import { generateSite, getJobStatus, getDownloadUrl, deleteDeployedSite } from '../services/api'
+import {
+  generateSite, getJobStatus, getDownloadUrl, deleteDeployedSite,
+  getJobEditableData, rebuildSite, generateSection, redeploySite,
+} from '../services/api'
 import { wsService } from '../services/websocket'
 
 export interface PipelineStep {
@@ -166,6 +169,9 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
         seoData.value = job.result.seo || seoData.value
         phase.value = 'result'
         isGenerating.value = false
+
+        // Auto-open editor when site is ready
+        openEditor()
 
         // Update history
         const existing = siteHistory.value.find(s => s.jobId === id)
@@ -336,6 +342,158 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     } catch { /* ignore */ }
   }
 
+  // ─── Editor State ─────────────────────────────────────
+  const editorOpen = ref(false)
+  const editableData = ref<Record<string, any> | null>(null)
+  const savedDataSnapshot = ref<string | null>(null) // JSON snapshot of last saved state
+  const editorDirty = computed(() => {
+    if (!editableData.value || !savedDataSnapshot.value) return false
+    return JSON.stringify(editableData.value) !== savedDataSnapshot.value
+  })
+  const showUnsavedWarning = ref(false)
+  const isRebuilding = ref(false)
+  const isGeneratingSection = ref(false)
+  const isRedeploying = ref(false)
+  const editorError = ref('')
+  const iframeRef = ref<HTMLIFrameElement | null>(null)
+
+  function openEditor() {
+    if (!jobId.value) return
+    editorOpen.value = true
+    showUnsavedWarning.value = false
+    // Only fetch if we don't already have data loaded
+    if (editableData.value) return
+    getJobEditableData(jobId.value).then((res) => {
+      editableData.value = res.data
+      savedDataSnapshot.value = JSON.stringify(res.data)
+    }).catch((err) => {
+      console.error('[Editor] Failed to load editable data:', err)
+      editorError.value = 'Failed to load site data for editing'
+    })
+  }
+
+  function closeEditor() {
+    if (editorDirty.value) {
+      showUnsavedWarning.value = true
+      return
+    }
+    editorOpen.value = false
+  }
+
+  function forceCloseEditor() {
+    showUnsavedWarning.value = false
+    editorOpen.value = false
+  }
+
+  function updateEditableField(path: string, value: any) {
+    if (!editableData.value) return
+    // Support dot-notation paths like "services.0.name"
+    const keys = path.split('.')
+    let obj: any = editableData.value
+    for (let i = 0; i < keys.length - 1; i++) {
+      const key = isNaN(Number(keys[i])) ? keys[i] : Number(keys[i])
+      obj = obj[key]
+    }
+    const lastKey = isNaN(Number(keys[keys.length - 1]))
+      ? keys[keys.length - 1]
+      : Number(keys[keys.length - 1])
+    obj[lastKey] = value
+  }
+
+  function addEditableArrayItem(path: string, item: any) {
+    if (!editableData.value) return
+    const arr = editableData.value[path]
+    if (Array.isArray(arr)) {
+      arr.push(item)
+    }
+  }
+
+  function removeEditableArrayItem(path: string, index: number) {
+    if (!editableData.value) return
+    const arr = editableData.value[path]
+    if (Array.isArray(arr)) {
+      arr.splice(index, 1)
+    }
+  }
+
+  function moveEditableArrayItem(path: string, from: number, direction: 'up' | 'down') {
+    if (!editableData.value) return
+    const arr = editableData.value[path]
+    if (!Array.isArray(arr)) return
+    const to = direction === 'up' ? from - 1 : from + 1
+    if (to < 0 || to >= arr.length) return
+    const item = arr.splice(from, 1)[0]
+    arr.splice(to, 0, item)
+  }
+
+  function quickPreview() {
+    if (!editableData.value || !iframeRef.value) return
+    iframeRef.value.contentWindow?.postMessage(
+      { type: 'QUICK_PREVIEW', payload: editableData.value },
+      '*',
+    )
+  }
+
+  async function applyChanges() {
+    if (!jobId.value || !editableData.value) return
+    isRebuilding.value = true
+    editorError.value = ''
+    try {
+      const result = await rebuildSite(jobId.value, editableData.value)
+      resultHtml.value = result.html
+      // Update title/business name from edited data
+      resultTitle.value = editableData.value.seo_title || resultTitle.value
+      resultBusinessName.value = editableData.value.business_name || resultBusinessName.value
+      // Snapshot as saved state
+      savedDataSnapshot.value = JSON.stringify(editableData.value)
+      showUnsavedWarning.value = false
+    } catch (err: any) {
+      editorError.value = err.message || 'Rebuild failed'
+    } finally {
+      isRebuilding.value = false
+    }
+  }
+
+  async function aiGenerateSection(sectionType: string, prompt: string) {
+    if (!editableData.value) return
+    isGeneratingSection.value = true
+    editorError.value = ''
+    try {
+      const result = await generateSection(sectionType, prompt, {
+        business_name: editableData.value.business_name || '',
+        category: editableData.value.category || '',
+      })
+      // Append generated items to the section array
+      const arr = editableData.value[sectionType]
+      if (Array.isArray(arr)) {
+        arr.push(...result.items)
+      } else {
+        editableData.value[sectionType] = result.items
+      }
+      return result.items
+    } catch (err: any) {
+      editorError.value = err.message || 'AI generation failed'
+      throw err
+    } finally {
+      isGeneratingSection.value = false
+    }
+  }
+
+  async function redeployEditedSite() {
+    if (!jobId.value) return
+    isRedeploying.value = true
+    editorError.value = ''
+    try {
+      const result = await redeploySite(jobId.value)
+      resultDeployUrl.value = result.deploy_url
+      resultDeployProvider.value = result.deploy_provider
+    } catch (err: any) {
+      editorError.value = err.message || 'Redeploy failed'
+    } finally {
+      isRedeploying.value = false
+    }
+  }
+
   // ─── WebSocket Lifecycle ───────────────────────────────
   function initWebSocket() {
     wsService.connect()
@@ -359,11 +517,19 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     resultDeployUrl, resultDeployProvider, seoData,
     errorMessage, errorDetails,
     siteHistory, previewDevice,
+    // Editor State
+    editorOpen, editableData, editorDirty, showUnsavedWarning,
+    isRebuilding, isGeneratingSection, isRedeploying,
+    editorError, iframeRef,
     // Computed
     downloadUrl, previewWidth,
     // Actions
     stepStatus, addLog, startGeneration, resetToInput,
     viewSite, deleteSite, loadSiteHistory, saveSiteHistory,
     initWebSocket, destroyWebSocket,
+    // Editor Actions
+    openEditor, closeEditor, forceCloseEditor, updateEditableField,
+    addEditableArrayItem, removeEditableArrayItem, moveEditableArrayItem,
+    quickPreview, applyChanges, aiGenerateSection, redeployEditedSite,
   }
 })

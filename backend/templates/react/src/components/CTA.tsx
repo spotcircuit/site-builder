@@ -5,6 +5,7 @@ export default function CTA({ data }: { data: any }) {
 
   return (
     <section
+      id="cta"
       ref={sectionRef}
       className="relative py-20 px-4 overflow-hidden"
       style={{

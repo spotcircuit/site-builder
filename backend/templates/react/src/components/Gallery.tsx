@@ -14,6 +14,7 @@ export default function Gallery({ data }: { data: any }) {
 
   return (
     <section
+      id="gallery"
       ref={sectionRef}
       className="py-16 px-4"
       style={{ backgroundColor: 'rgba(var(--color-primary-rgb, 59, 130, 246), 0.05)' }}

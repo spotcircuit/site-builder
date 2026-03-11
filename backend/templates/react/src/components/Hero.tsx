@@ -22,7 +22,7 @@ export default function Hero({ data }: HeroProps) {
       }
 
   return (
-    <section className="relative overflow-hidden" style={backgroundStyle}>
+    <section id="hero" className="relative overflow-hidden" style={backgroundStyle}>
       {/* ── Decorative Circles ── */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
         <div

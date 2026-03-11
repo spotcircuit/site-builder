@@ -38,3 +38,81 @@ export async function deleteDeployedSite(projectName: string) {
   })
   return res.json()
 }
+
+export function getApiBase() {
+  return API_BASE
+}
+
+// ─── Image Upload ─────────────────────────────────────
+
+export async function uploadImage(file: File): Promise<{ url: string; filename: string }> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${API_BASE}/api/upload-image`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+    throw new Error(err.detail || `Upload failed: ${res.status}`)
+  }
+  const data = await res.json()
+  // Convert relative URL to absolute so it works in iframe
+  data.url = `${API_BASE}${data.url}`
+  return data
+}
+
+// ─── Editor API ────────────────────────────────────────
+
+export async function getJobEditableData(jobId: string) {
+  const res = await fetch(`${API_BASE}/api/job/${jobId}/data`)
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return res.json()
+}
+
+export async function rebuildSite(jobId: string, data: Record<string, any>) {
+  const res = await fetch(`${API_BASE}/api/rebuild-site`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_id: jobId, data }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+    throw new Error(err.detail || `Rebuild failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function generateSection(
+  sectionType: string,
+  prompt: string,
+  context: Record<string, any>,
+) {
+  const res = await fetch(`${API_BASE}/api/generate-section`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      section_type: sectionType,
+      prompt,
+      context,
+    }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+    throw new Error(err.detail || `Generation failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function redeploySite(jobId: string) {
+  const res = await fetch(`${API_BASE}/api/redeploy-site`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_id: jobId }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+    throw new Error(err.detail || `Deploy failed: ${res.status}`)
+  }
+  return res.json()
+}

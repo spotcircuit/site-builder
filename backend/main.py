@@ -18,15 +18,18 @@ from datetime import datetime
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
+from pathlib import Path as FilePath
+
+from fastapi import FastAPI, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from modules.maps_url_parser import parse_maps_url, ParsedMapsUrl
 from modules.maps_scraper import scrape_business_from_maps, BusinessData
 from modules.website_scraper import scrape_website, WebsiteData
 from modules.site_generator import generate_site, generate_site_content, GeneratedSite, SiteContent
-from modules.react_builder import build_react_site, cleanup_build, ReactBuildResult
+from modules.react_builder import build_react_site, rebuild_react_site, cleanup_build, ReactBuildResult
 from modules.vercel_deployer import deploy_to_vercel, is_vercel_configured
 from modules.cloudflare_deployer import deploy_to_cloudflare, is_cloudflare_configured
 from modules.image_generator import generate_site_images, is_gemini_configured
@@ -51,6 +54,11 @@ app = FastAPI(
     description="Generate business websites from Google Maps URLs",
 )
 
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(_cleanup_expired_jobs())
+
+
 # CORS -- permissive for local development
 app.add_middleware(
     CORSMiddleware,
@@ -70,9 +78,57 @@ app.add_middleware(
 ws_manager = get_websocket_manager()
 
 # ---------------------------------------------------------------------------
+# Uploads directory for user-uploaded images
+# ---------------------------------------------------------------------------
+UPLOADS_DIR = FilePath(__file__).parent / "uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
+
+# ---------------------------------------------------------------------------
 # In-memory job storage
 # ---------------------------------------------------------------------------
 jobs: dict[str, dict[str, Any]] = {}
+
+# Job TTL: auto-delete undeployed jobs after 3 days
+JOB_TTL_SECONDS = 3 * 24 * 60 * 60  # 3 days
+
+
+async def _cleanup_expired_jobs():
+    """Background task: delete expired undeployed jobs and their build dirs."""
+    while True:
+        await asyncio.sleep(3600)  # Check every hour
+        now = datetime.now()
+        expired = []
+        for jid, job in jobs.items():
+            created_str = job.get("created_at")
+            if not created_str:
+                continue
+            try:
+                created = datetime.fromisoformat(created_str)
+            except (TypeError, ValueError):
+                continue
+            age = (now - created).total_seconds()
+            # Keep deployed sites longer (7 days), undeployed 3 days
+            is_deployed = bool(job.get("result", {}).get("deploy_url"))
+            ttl = JOB_TTL_SECONDS * 2 if is_deployed else JOB_TTL_SECONDS
+            if age > ttl:
+                expired.append(jid)
+        for jid in expired:
+            job = jobs.pop(jid, None)
+            if job:
+                build_dir = job.get("result", {}).get("build_dir")
+                if build_dir:
+                    try:
+                        cleanup_build(build_dir)
+                    except Exception:
+                        pass
+                try:
+                    age_hrs = (now - datetime.fromisoformat(job["created_at"])).total_seconds() / 3600
+                except Exception:
+                    age_hrs = -1
+                logger.info("Cleaned up expired job %s (age: %.1f hours)", jid, age_hrs)
+        if expired:
+            logger.info("Cleaned up %d expired jobs", len(expired))
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +149,27 @@ class GenerateSiteResponse(BaseModel):
 
     job_id: str
     status: str
+
+
+class RebuildSiteRequest(BaseModel):
+    """Request body for rebuilding a site with edited data."""
+
+    job_id: str
+    data: dict  # The full data.json payload
+
+
+class GenerateSectionRequest(BaseModel):
+    """Request body for AI-generating new section content."""
+
+    section_type: str  # "services", "faq_items", "testimonials", "why_choose_us", "process_steps"
+    prompt: str  # User's instruction
+    context: dict  # Business context (name, category, existing content summary)
+
+
+class RedeploySiteRequest(BaseModel):
+    """Request body for re-deploying an edited site."""
+
+    job_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +419,7 @@ async def run_generation_pipeline(
             generated_images=generated_images.model_dump() if generated_images else None,
         )
 
-        # Store result
+        # Store result (include business_data for editor rebuild)
         jobs[job_id]["result"] = {
             "html": build_result.index_html,
             "title": content.seo_title,
@@ -352,6 +429,7 @@ async def run_generation_pipeline(
             "dist_path": build_result.dist_path,
             "build_dir": build_result.build_dir,
             "content": content.model_dump(),
+            "business_data": biz_dict,
             "deploy_url": None,
             "deploy_provider": None,
             # SEO & local ranking data for frontend display
@@ -651,6 +729,245 @@ async def delete_deployed_site(project_name: str):
     raise HTTPException(status_code=500, detail=f"Delete failed: {errors}")
 
 
+# ---------------------------------------------------------------------------
+# Editor endpoints
+# ---------------------------------------------------------------------------
+@app.post("/api/rebuild-site")
+async def rebuild_site_endpoint(request: RebuildSiteRequest):
+    """Rebuild a site with updated data.json from the editor.
+
+    Re-uses the existing build directory (skips template copy + npm install),
+    writes updated data.json, re-runs npm build, returns new HTML.
+    """
+    if request.job_id not in jobs:
+        raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
+
+    job = jobs[request.job_id]
+    result = job.get("result")
+    if not result or not result.get("build_dir"):
+        raise HTTPException(status_code=400, detail="Job has no build directory (may have been cleaned up)")
+
+    build_dir = result["build_dir"]
+
+    try:
+        build_result = await rebuild_react_site(
+            data=request.data,
+            build_dir=build_dir,
+        )
+
+        # Update stored result
+        result["html"] = build_result.index_html
+        result["dist_path"] = build_result.dist_path
+        # Update stored content fields from the edited data
+        result["title"] = request.data.get("seo_title", result.get("title", ""))
+        result["business_name"] = request.data.get("business_name", result.get("business_name", ""))
+
+        return {"html": build_result.index_html, "status": "rebuilt"}
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Rebuild failed: {exc}")
+
+
+@app.post("/api/generate-section")
+async def generate_section_endpoint(request: GenerateSectionRequest):
+    """Generate new content items for a specific section using Claude AI.
+
+    Returns a list of items that can be appended to the section array.
+    """
+    from modules.site_generator import _get_anthropic_client
+
+    section_prompts = {
+        "services": {
+            "instruction": "Generate new services/offerings for this business.",
+            "format": '[{"name": "string", "description": "string (2 sentences)", "icon_suggestion": "icon-name"}]',
+            "icons": "wrench, heart, shield-check, chart-bar, clock, map-pin, star, truck, camera, paint-brush, cog, bolt, sparkles, fire, cube, scissors, phone, home, check-circle, globe, users, briefcase",
+        },
+        "faq_items": {
+            "instruction": "Generate FAQ items for this business.",
+            "format": '[{"question": "string", "answer": "string (2-3 sentences)"}]',
+            "icons": "",
+        },
+        "testimonials": {
+            "instruction": "Generate realistic sample testimonials for this business. Prefix author names with [Sample].",
+            "format": '[{"author": "[Sample] Name", "rating": 5, "text": "string (2-3 sentences)"}]',
+            "icons": "",
+        },
+        "why_choose_us": {
+            "instruction": "Generate differentiator items for this business.",
+            "format": '[{"title": "string", "description": "string (1-2 sentences)", "icon_key": "icon-name"}]',
+            "icons": "wrench, heart, shield-check, chart-bar, clock, star, sparkles, check-circle, globe, users",
+        },
+        "process_steps": {
+            "instruction": "Generate how-it-works process steps for this business.",
+            "format": '[{"step_number": 1, "title": "string", "description": "string (1-2 sentences)", "icon_key": "icon-name"}]',
+            "icons": "check-circle, clock, star, sparkles, globe, users, briefcase",
+        },
+    }
+
+    if request.section_type not in section_prompts:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown section type: {request.section_type}. Valid: {list(section_prompts.keys())}",
+        )
+
+    spec = section_prompts[request.section_type]
+    business_name = request.context.get("business_name", "the business")
+    category = request.context.get("category", "")
+
+    icon_instruction = f"\nUse icon names from: {spec['icons']}" if spec["icons"] else ""
+
+    system_prompt = (
+        f"You generate website section content for business websites. "
+        f"Return ONLY a valid JSON array (no markdown, no explanation). "
+        f"Format: {spec['format']}{icon_instruction}"
+    )
+
+    user_prompt = (
+        f"{spec['instruction']}\n\n"
+        f"Business: {business_name}\n"
+        f"Category: {category}\n"
+        f"User request: {request.prompt}\n\n"
+        f"Return a JSON array with the requested items."
+    )
+
+    try:
+        client = _get_anthropic_client()
+        response = await client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2048,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+
+        raw_text = response.content[0].text.strip()
+
+        # Parse JSON array from response
+        import json as json_module
+
+        # Try direct parse
+        try:
+            items = json_module.loads(raw_text)
+        except json_module.JSONDecodeError:
+            # Try extracting from markdown fences
+            fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", raw_text, re.DOTALL)
+            if fence_match:
+                items = json_module.loads(fence_match.group(1).strip())
+            else:
+                bracket_match = re.search(r"\[.*\]", raw_text, re.DOTALL)
+                if bracket_match:
+                    items = json_module.loads(bracket_match.group(0))
+                else:
+                    raise ValueError("Could not parse AI response as JSON array")
+
+        if not isinstance(items, list):
+            items = [items]
+
+        # Auto-number process steps
+        if request.section_type == "process_steps":
+            for i, item in enumerate(items):
+                item["step_number"] = i + 1
+
+        return {"items": items, "section_type": request.section_type}
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"AI generation failed: {exc}")
+
+
+@app.post("/api/redeploy-site")
+async def redeploy_site_endpoint(request: RedeploySiteRequest):
+    """Re-deploy an edited site using the existing dist/ directory."""
+    if request.job_id not in jobs:
+        raise HTTPException(status_code=404, detail=f"Job not found: {request.job_id}")
+
+    job = jobs[request.job_id]
+    result = job.get("result")
+    if not result or not result.get("dist_path"):
+        raise HTTPException(status_code=400, detail="No built site to deploy")
+
+    from pathlib import Path
+
+    dist_path = Path(result["dist_path"])
+    if not dist_path.exists():
+        raise HTTPException(status_code=400, detail="Build directory no longer exists")
+
+    business_name = result.get("business_name", "site")
+
+    resolved_target = _resolve_deploy_target("auto")
+    if not resolved_target:
+        raise HTTPException(status_code=500, detail="No deploy provider configured")
+
+    try:
+        deploy_result = None
+        if resolved_target == "cloudflare":
+            try:
+                deploy_result = await deploy_to_cloudflare(
+                    dist_path=dist_path,
+                    business_name=business_name,
+                    job_id=request.job_id,
+                )
+            except Exception:
+                if is_vercel_configured():
+                    deploy_result = await deploy_to_vercel(
+                        dist_path=dist_path,
+                        business_name=business_name,
+                        job_id=request.job_id,
+                    )
+        elif resolved_target == "vercel":
+            try:
+                deploy_result = await deploy_to_vercel(
+                    dist_path=dist_path,
+                    business_name=business_name,
+                    job_id=request.job_id,
+                )
+            except Exception:
+                if is_cloudflare_configured():
+                    deploy_result = await deploy_to_cloudflare(
+                        dist_path=dist_path,
+                        business_name=business_name,
+                        job_id=request.job_id,
+                    )
+
+        if deploy_result:
+            result["deploy_url"] = deploy_result.url
+            result["deploy_provider"] = deploy_result.provider
+            return {
+                "deploy_url": deploy_result.url,
+                "deploy_provider": deploy_result.provider,
+                "status": "deployed",
+            }
+
+        raise RuntimeError("All deploy providers failed")
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Deploy failed: {exc}")
+
+
+@app.get("/api/job/{job_id}/data")
+async def get_job_editable_data(job_id: str):
+    """Get the editable data.json payload for a completed job.
+
+    Used by the editor to populate the editing panel.
+    """
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+    job = jobs[job_id]
+    result = job.get("result")
+    if not result:
+        raise HTTPException(status_code=400, detail="Job has no result yet")
+
+    content = result.get("content", {})
+    business_data = result.get("business_data", {})
+
+    # Reconstruct the data.json payload
+    from modules.react_builder import _generate_data_json
+
+    data = _generate_data_json(content, business_data)
+    return {"data": data}
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
@@ -668,6 +985,32 @@ async def health_check():
             "gemini": is_gemini_configured(),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Image Upload
+# ---------------------------------------------------------------------------
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"}
+MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
+@app.post("/api/upload-image")
+async def upload_image(file: UploadFile):
+    """Upload an image file and return its URL."""
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(400, f"Unsupported image type: {file.content_type}")
+
+    contents = await file.read()
+    if len(contents) > MAX_IMAGE_SIZE:
+        raise HTTPException(400, "Image too large (max 10 MB)")
+
+    ext = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "jpg"
+    filename = f"{uuid.uuid4().hex[:12]}.{ext}"
+    filepath = UPLOADS_DIR / filename
+    filepath.write_bytes(contents)
+
+    # Return URL relative to API base so frontend can use it directly
+    return {"url": f"/uploads/{filename}", "filename": filename}
 
 
 # ---------------------------------------------------------------------------

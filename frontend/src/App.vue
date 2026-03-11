@@ -28,7 +28,7 @@
     </header>
 
     <!-- Main Content -->
-    <main class="flex-1 max-w-6xl mx-auto w-full px-6 py-8">
+    <main class="flex-1 w-full" :class="store.phase === 'result' ? '' : 'max-w-6xl mx-auto px-6 py-8'">
 
       <!-- INPUT PHASE -->
       <section v-if="store.phase === 'input'" class="space-y-8">
@@ -143,94 +143,69 @@
       <ProgressPanel v-if="store.phase === 'progress'" />
 
       <!-- RESULT PHASE -->
-      <section v-if="store.phase === 'result'" class="space-y-6">
-        <div class="text-center mb-4">
-          <h2 class="text-2xl font-bold text-white mb-1">
-            {{ store.resultTitle || 'Site Ready' }}
-          </h2>
-          <p class="text-gray-400">
-            Website for <span class="text-cyan-400 font-medium">{{ store.resultBusinessName }}</span> has been generated.
-          </p>
-        </div>
-
-        <!-- Deploy URL Banner -->
-        <div
-          v-if="store.resultDeployUrl"
-          class="bg-emerald-900/30 border border-emerald-600/30 rounded-xl p-4 flex items-center justify-between"
-        >
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
-              <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
+      <section v-if="store.phase === 'result'">
+        <!-- Top bar: title + actions -->
+        <div class="flex items-center justify-between px-6 py-3 border-b border-gray-700/50 bg-gray-800/50">
+          <div class="flex items-center gap-4">
             <div>
-              <p class="text-emerald-300 font-semibold text-sm">
-                Live on {{ store.resultDeployProvider === 'cloudflare' ? 'Cloudflare Pages' : 'Vercel' }}
-              </p>
-              <a
-                :href="store.resultDeployUrl"
-                target="_blank"
-                class="text-emerald-400 hover:text-emerald-300 underline text-sm"
-              >
-                {{ store.resultDeployUrl }}
-              </a>
+              <h2 class="text-lg font-bold text-white">
+                {{ store.resultBusinessName || 'Site Ready' }}
+              </h2>
+              <p class="text-xs text-gray-400">{{ store.resultTitle }}</p>
             </div>
+            <!-- Deploy badge -->
+            <a
+              v-if="store.resultDeployUrl"
+              :href="store.resultDeployUrl"
+              target="_blank"
+              class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-900/40 border border-emerald-600/30 text-emerald-400 text-xs font-medium hover:bg-emerald-900/60 transition-colors"
+            >
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              Live
+            </a>
           </div>
-          <a
-            :href="store.resultDeployUrl"
-            target="_blank"
-            class="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition-all shadow-lg shadow-emerald-600/20"
-          >
-            Visit Live Site
-          </a>
+          <div class="flex items-center gap-2">
+            <!-- Toggle editor -->
+            <button
+              @click="store.editorOpen ? store.closeEditor() : store.openEditor()"
+              class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2"
+              :class="store.editorOpen
+                ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/20'
+                : 'bg-cyan-600 hover:bg-cyan-500 text-white'"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              {{ store.editorOpen ? 'Hide Editor' : 'Edit Site' }}
+            </button>
+            <a
+              v-if="store.resultDeployUrl"
+              :href="store.resultDeployUrl"
+              target="_blank"
+              class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition-all"
+            >Visit Site</a>
+            <a
+              :href="store.downloadUrl"
+              target="_blank"
+              class="px-4 py-2 rounded-lg border border-gray-600 hover:border-gray-400 text-gray-300 hover:text-white text-sm font-semibold transition-all"
+            >Download</a>
+            <button
+              @click="store.resetToInput()"
+              class="px-4 py-2 rounded-lg border border-gray-600 hover:border-gray-400 text-gray-300 hover:text-white text-sm font-semibold transition-all"
+            >New Site</button>
+          </div>
         </div>
 
-        <!-- Device Preview + SEO Panel -->
-        <div class="flex gap-6 items-start">
-          <div class="flex-1 min-w-0">
+        <!-- Editor (left) + Preview (right) layout -->
+        <div class="flex">
+          <!-- Editor Panel - left side, always visible when open -->
+          <EditorPanel v-if="store.editorOpen" />
+
+          <!-- Preview area -->
+          <div class="flex-1 min-w-0 p-4">
             <DevicePreview :html="store.resultHtml" />
           </div>
-          <SeoScorePanel
-            v-if="store.seoData"
-            :business-name="store.resultBusinessName"
-            :rating="store.seoData.rating"
-            :review-count="store.seoData.review_count"
-            :has-phone="store.seoData.has_phone"
-            :has-address="store.seoData.has_address"
-            :has-website="store.seoData.has_website"
-            :has-hours="store.seoData.has_hours"
-            :has-photos="store.seoData.has_photos"
-            :has-reviews="store.seoData.has_reviews"
-            :category="store.seoData.category"
-            :seo-title="store.seoData.seo_title"
-            :seo-description="store.seoData.seo_description"
-          />
-        </div>
-
-        <!-- Action Buttons -->
-        <div class="flex items-center justify-center gap-4">
-          <a
-            v-if="store.resultDeployUrl"
-            :href="store.resultDeployUrl"
-            target="_blank"
-            class="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-all shadow-lg"
-          >
-            Visit Live Site
-          </a>
-          <a
-            :href="store.downloadUrl"
-            target="_blank"
-            class="px-6 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold transition-all shadow-lg"
-          >
-            Download HTML
-          </a>
-          <button
-            @click="store.resetToInput()"
-            class="px-6 py-3 rounded-xl border border-gray-600 hover:border-gray-400 text-gray-300 hover:text-white font-semibold transition-all"
-          >
-            Generate Another
-          </button>
         </div>
       </section>
 
@@ -271,6 +246,7 @@ import PlacesAutocomplete from './components/PlacesAutocomplete.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
 import SiteHistory from './components/SiteHistory.vue'
 import SeoScorePanel from './components/SeoScorePanel.vue'
+import EditorPanel from './components/editor/EditorPanel.vue'
 
 const store = useSiteBuilderStore()
 

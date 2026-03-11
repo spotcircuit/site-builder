@@ -11,6 +11,7 @@ export default function WhyChooseUs({ data }: { data: any }) {
 
   return (
     <section
+      id="why-choose-us"
       ref={sectionRef}
       className="bg-white py-20 px-4"
     >

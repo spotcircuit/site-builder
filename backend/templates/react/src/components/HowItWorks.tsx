@@ -8,6 +8,7 @@ export default function HowItWorks({ data }: { data: any }) {
 
   return (
     <section
+      id="how-it-works"
       ref={sectionRef}
       className="bg-gray-50 py-20 px-4"
     >
