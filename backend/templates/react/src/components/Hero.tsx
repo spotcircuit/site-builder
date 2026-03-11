@@ -5,10 +5,11 @@ interface HeroProps {
 export default function Hero({ data }: HeroProps) {
   const hasPhoto = data.photos && data.photos.length > 0
   const firstPhoto = hasPhoto ? data.photos[0] : null
+  const websiteHeroImage = data.website_hero_image || null
   const aiHeroImage = data.ai_hero_image || null
 
-  // Priority: Google Maps photo > AI-generated image > gradient fallback
-  const heroImage = firstPhoto || aiHeroImage
+  // Priority: Google Maps photo > website hero image > AI-generated image > gradient fallback
+  const heroImage = firstPhoto || websiteHeroImage || aiHeroImage
 
   const backgroundStyle: React.CSSProperties = heroImage
     ? {

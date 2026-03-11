@@ -57,6 +57,36 @@
               @clear="onPlaceClear"
             />
 
+            <!-- Website URL Override (optional) -->
+            <div>
+              <label class="block text-sm font-medium text-gray-300 mb-2">
+                Business Website URL
+                <span class="text-gray-500 font-normal">(optional — we'll scrape real images & branding)</span>
+              </label>
+              <input
+                v-model="store.websiteUrl"
+                type="url"
+                placeholder="https://example.com"
+                class="w-full px-4 py-3 rounded-xl bg-gray-900/50 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
+                :disabled="store.isGenerating"
+              />
+            </div>
+
+            <!-- Business Context (optional) -->
+            <div>
+              <label class="block text-sm font-medium text-gray-300 mb-2">
+                Business Context
+                <span class="text-gray-500 font-normal">(optional — helps AI write accurate content)</span>
+              </label>
+              <textarea
+                v-model="store.businessContext"
+                rows="3"
+                placeholder="e.g. Family-owned Italian restaurant since 1985, known for wood-fired pizza and homemade pasta. Open for lunch and dinner, with outdoor seating and private event space."
+                class="w-full px-4 py-3 rounded-xl bg-gray-900/50 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all resize-none"
+                :disabled="store.isGenerating"
+              ></textarea>
+            </div>
+
             <div class="grid grid-cols-2 gap-4">
               <!-- Template -->
               <div>

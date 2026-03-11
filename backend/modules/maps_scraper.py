@@ -618,10 +618,11 @@ async def extract_photos(page: Page, max_photos: int = 8) -> list[str]:
     return photos
 
 
-async def extract_reviews(page: Page, max_reviews: int = 15) -> list[dict[str, Any]]:
+async def extract_reviews(page: Page, max_reviews: int = 10) -> list[dict[str, Any]]:
     """
     Click the Reviews tab, scroll to load content, and extract review data.
     Uses the proven getrankedlocal production selectors.
+    Entire operation is capped at 20 seconds to avoid blocking the pipeline.
 
     Args:
         page: The Playwright page already on the business listing.
@@ -632,7 +633,7 @@ async def extract_reviews(page: Page, max_reviews: int = 15) -> list[dict[str, A
     """
     reviews: list[dict[str, Any]] = []
 
-    try:
+    async def _do_extract() -> list[dict[str, Any]]:
         # Click the Reviews tab - production selectors
         # Only proceed if a Reviews tab actually exists
         reviews_tab = await page.query_selector(
@@ -644,35 +645,39 @@ async def extract_reviews(page: Page, max_reviews: int = 15) -> list[dict[str, A
 
         if not reviews_tab:
             logger.info("No Reviews tab found - business may have too few reviews")
-            return reviews
+            return []
 
         await reviews_tab.click()
         await asyncio.sleep(1.5)
 
-        # Scroll the review feed to load more reviews — scroll 5 batches
+        # Scroll the review feed to load more reviews — 3 quick scrolls
         review_feed = await page.query_selector(
             '[role="feed"], .m6QErb[aria-label*="Reviews"], .m6QErb.DxyBCb'
         )
         if review_feed:
-            for _ in range(8):
+            for _ in range(3):
                 await review_feed.evaluate('(element) => element.scrollTop = element.scrollHeight')
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.8)
 
         # Expand truncated review text by clicking "More" buttons
         more_buttons = await page.query_selector_all(
             'button.w8nwRe, button[aria-label="See more"], '
             'button.M77dve, a.review-more-link'
         )
-        for btn in more_buttons[:max_reviews + 10]:
+        for btn in more_buttons[:max_reviews]:
             try:
                 await btn.click()
-                await asyncio.sleep(0.15)
+                await asyncio.sleep(0.1)
             except Exception:
                 pass
 
         # Extract review data — uses .MyEned / .wiI7pd for actual review text
-        reviews = await page.evaluate(EXTRACT_REVIEWS_JS, max_reviews)
+        return await page.evaluate(EXTRACT_REVIEWS_JS, max_reviews)
 
+    try:
+        reviews = await asyncio.wait_for(_do_extract(), timeout=20)
+    except asyncio.TimeoutError:
+        logger.warning("Review extraction timed out after 20s (non-fatal)")
     except Exception as exc:
         logger.warning("Review extraction failed (non-fatal): %s", exc)
 

@@ -4,6 +4,8 @@ export async function generateSite(
   mapsUrl: string,
   templateName: string = 'modern',
   deployTarget?: string,
+  businessContext?: string,
+  websiteUrl?: string,
 ) {
   const res = await fetch(`${API_BASE}/api/generate-site`, {
     method: 'POST',
@@ -12,6 +14,8 @@ export async function generateSite(
       maps_url: mapsUrl,
       template_name: templateName,
       deploy_target: deployTarget || null,
+      business_context: businessContext || null,
+      website_url: websiteUrl || null,
     })
   })
   if (!res.ok) throw new Error(`API error: ${res.status}`)

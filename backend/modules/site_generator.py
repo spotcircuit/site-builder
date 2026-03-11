@@ -201,6 +201,10 @@ scraped from Google Maps, you produce compelling, conversion-optimized website \
 copy and sophisticated design choices.
 
 RULES:
+- If a "BUSINESS OWNER'S DESCRIPTION" section is provided, treat it as the \
+PRIMARY source of truth for services, specialties, tone, and business identity. \
+Do NOT hallucinate or invent services that aren't mentioned by the owner or found \
+in the scraped data. Only describe what you know is real.
 - ALWAYS write all content in English, regardless of the language of the input data. \
 If business data is in another language, translate it to natural English. \
 Keep the original business name as-is (even if in another script/language) but write \
@@ -295,6 +299,12 @@ def _build_content_prompt(business_data: dict) -> str:
         Formatted user prompt string.
     """
     parts: list[str] = ["Generate website content for the following business:\n"]
+
+    # User-provided business context (highest priority — prevents AI hallucination)
+    if business_data.get("user_context"):
+        parts.append(f"\n=== BUSINESS OWNER'S DESCRIPTION (use this as primary source of truth) ===")
+        parts.append(f"{business_data['user_context']}")
+        parts.append(f"=== END BUSINESS OWNER'S DESCRIPTION ===\n")
 
     # Core identity
     if business_data.get("name"):

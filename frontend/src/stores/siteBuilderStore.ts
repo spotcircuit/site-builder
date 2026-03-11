@@ -41,6 +41,8 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
   const mapsUrl = ref('')
   const templateName = ref('modern')
   const deployTarget = ref('auto')
+  const businessContext = ref('')
+  const websiteUrl = ref('')
   const isGenerating = ref(false)
   const wsConnected = ref(false)
   const currentMessage = ref('')
@@ -215,6 +217,8 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
         mapsUrl.value.trim(),
         templateName.value,
         deployTarget.value,
+        businessContext.value.trim(),
+        websiteUrl.value.trim(),
       )
       jobId.value = response.job_id
       addLog('info', `Job created: ${response.job_id}`)
@@ -243,6 +247,8 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     phase.value = 'input'
     isGenerating.value = false
     mapsUrl.value = ''
+    businessContext.value = ''
+    websiteUrl.value = ''
     completedSteps.clear()
     activeStep.value = null
     Object.keys(stepMessages).forEach(k => delete stepMessages[k])
@@ -346,7 +352,7 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
 
   return {
     // State
-    phase, mapsUrl, templateName, deployTarget, isGenerating,
+    phase, mapsUrl, templateName, deployTarget, businessContext, websiteUrl, isGenerating,
     wsConnected, currentMessage, jobId,
     completedSteps, activeStep, stepMessages,
     logs, resultHtml, resultTitle, resultBusinessName,

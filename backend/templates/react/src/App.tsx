@@ -28,7 +28,7 @@ function App() {
       <Services data={data} />
       {data.why_choose_us?.length > 0 && <WhyChooseUs data={data} />}
       {data.process_steps?.length > 0 && <HowItWorks data={data} />}
-      {(data.photos?.length > 0 || data.ai_gallery_images?.length > 0) && <Gallery data={data} />}
+      {(data.photos?.length > 0 || data.website_images?.length > 0 || data.ai_gallery_images?.length > 0) && <Gallery data={data} />}
       {data.testimonials?.length > 0 && <Testimonials data={data} />}
       {data.faq_items?.length > 0 && <FAQ data={data} />}
       <CTA data={data} />

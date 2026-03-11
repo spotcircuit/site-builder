@@ -14,7 +14,7 @@ export default function Navbar({ data }: NavbarProps) {
     { label: 'Contact', href: '#contact' },
   ]
 
-  const logoUrl = data.website_data?.logo_url || data.logo_url
+  const logoUrl = data.website_logo_url || data.website_data?.logo_url || data.logo_url
 
   return (
     <nav className="sticky top-0 z-50 bg-white/95 backdrop-blur-md shadow-[0_1px_3px_rgba(0,0,0,0.08)]">

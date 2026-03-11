@@ -84,6 +84,8 @@ class GenerateSiteRequest(BaseModel):
     maps_url: str
     template_name: str = "modern"
     deploy_target: Optional[str] = None  # "vercel", "cloudflare", "auto", or None
+    business_context: Optional[str] = None  # User-provided business description
+    website_url: Optional[str] = None  # Override website URL for scraping
 
 
 class GenerateSiteResponse(BaseModel):
@@ -117,6 +119,8 @@ async def run_generation_pipeline(
     maps_url: str,
     template_name: str,
     deploy_target: Optional[str] = None,
+    business_context: Optional[str] = None,
+    website_url: Optional[str] = None,
 ) -> None:
     """
     Execute the full site-generation pipeline for a given job.
@@ -189,16 +193,21 @@ async def run_generation_pipeline(
         )
 
         # ── Step 2.5: Scrape the business website for branding ──────────
+        # Use user-provided website URL if given, otherwise fall back to Maps data
+        effective_website = website_url or business_data.website
+        if website_url and not business_data.website:
+            business_data.website = website_url  # Store for downstream use
+
         website_data: Optional[WebsiteData] = None
-        if business_data.website:
+        if effective_website:
             try:
                 await ws_manager.broadcast_step(
                     step="scraping_website",
                     status="started",
-                    message=f"Scraping business website: {business_data.website}",
+                    message=f"Scraping business website: {effective_website}",
                     data={"job_id": job_id},
                 )
-                website_data = await scrape_website(business_data.website)
+                website_data = await scrape_website(effective_website)
                 await ws_manager.broadcast_step(
                     step="scraping_website",
                     status="completed",
@@ -240,6 +249,9 @@ async def run_generation_pipeline(
         # Merge website scrape data so the AI can use branding, about text, etc.
         if website_data:
             biz_dict["website_data"] = website_data.model_dump()
+        # Add user-provided business context
+        if business_context:
+            biz_dict["user_context"] = business_context
         content: SiteContent = await generate_site_content(
             business_data=biz_dict,
             callback=_generator_callback,
@@ -523,6 +535,8 @@ async def generate_site_endpoint(request: GenerateSiteRequest):
             maps_url=request.maps_url,
             template_name=request.template_name,
             deploy_target=request.deploy_target,
+            business_context=request.business_context,
+            website_url=request.website_url,
         )
     )
 

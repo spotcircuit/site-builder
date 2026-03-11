@@ -175,6 +175,26 @@ def _generate_data_json(
         "reviews": business_data.get("reviews") or [],
     }
 
+    # Inject website-scraped images and branding into data.json
+    website_data = business_data.get("website_data")
+    if website_data and isinstance(website_data, dict):
+        # Logo from business website
+        if website_data.get("logo_url"):
+            data["website_logo_url"] = website_data["logo_url"]
+        # Hero image from business website
+        if website_data.get("hero_image_url"):
+            data["website_hero_image"] = website_data["hero_image_url"]
+        # Gallery images from business website (external URLs)
+        site_images = website_data.get("images") or []
+        if site_images:
+            data["website_images"] = site_images[:12]
+        # Brand colors from website
+        if website_data.get("brand_colors"):
+            data["website_brand_colors"] = website_data["brand_colors"]
+        # Social links from website
+        if website_data.get("social_links"):
+            data["social_links"] = website_data["social_links"]
+
     # Use real Google reviews as testimonials if available (priority over AI-generated)
     # Only include 4-5 star reviews to present the business positively
     real_reviews = business_data.get("reviews") or []

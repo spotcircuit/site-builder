@@ -3,10 +3,12 @@ import { useScrollAnimation } from '../hooks/useScrollAnimation'
 export default function Gallery({ data }: { data: any }) {
   const sectionRef = useScrollAnimation()
 
-  // Use Google Maps photos, fall back to AI-generated gallery images
+  // Priority: Google Maps photos > website-scraped images > AI-generated gallery images
   const photos = (data.photos && data.photos.length > 0)
     ? data.photos
-    : (data.ai_gallery_images || [])
+    : (data.website_images && data.website_images.length > 0)
+      ? data.website_images
+      : (data.ai_gallery_images || [])
 
   if (photos.length === 0) return null
 
