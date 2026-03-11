@@ -764,7 +764,7 @@ async def scrape_business_from_maps(
             # ── Establish Google session ──
             # Visit google.com first to accept cookies and get a session.
             # This makes Google Maps show the FULL view with all tabs.
-            await page.goto("https://www.google.com/", wait_until="load", timeout=15000)
+            await page.goto("https://www.google.com/?hl=en", wait_until="load", timeout=15000)
             await asyncio.sleep(2)
 
             # Accept cookie consent if prompted
@@ -800,13 +800,13 @@ async def scrape_business_from_maps(
                 search_query = business_name
 
             if search_query:
-                url = f"https://www.google.com/maps/search/{quote_plus(search_query)}"
+                url = f"https://www.google.com/maps/search/{quote_plus(search_query)}?hl=en"
                 await _notify(callback, "navigating", f"Searching Google Maps for: {search_query}")
             elif cid:
-                url = f"https://www.google.com/maps?cid={cid}"
+                url = f"https://www.google.com/maps?cid={cid}&hl=en"
                 await _notify(callback, "navigating", f"Navigating via CID: {cid}")
             elif place_id:
-                url = f"https://www.google.com/maps/place/?q=place_id:{place_id}"
+                url = f"https://www.google.com/maps/place/?q=place_id:{place_id}&hl=en"
                 await _notify(callback, "navigating", f"Navigating via place_id: {place_id}")
             else:
                 raise ValueError("Could not build a navigation URL")

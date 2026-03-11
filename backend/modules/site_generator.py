@@ -197,6 +197,8 @@ scraped from Google Maps, you produce compelling, conversion-optimized website \
 copy and sophisticated design choices.
 
 RULES:
+- ALWAYS write all content in English, regardless of the language of the input data. \
+If business data is in another language, translate it to natural English.
 - Write in a confident, premium tone appropriate to the business industry.
 - Headlines should be benefit-driven and emotionally compelling (not generic).
 - About text should be 2-3 substantial paragraphs that tell the business story.
