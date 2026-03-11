@@ -31,11 +31,8 @@
       rel="stylesheet"
     />
 
-    <!-- Inline SVG Favicon -->
-    <link
-      rel="icon"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='{{COLOR_PRIMARY}}'/><text x='50' y='50' text-anchor='middle' dy='.35em' font-size='50' font-weight='bold' fill='white'>{{FAVICON_LETTER}}</text></svg>"
-    />
+    <!-- Favicon (generated at build time) -->
+    <link rel="icon" href="{{FAVICON_DATA_URI}}" />
   </head>
   <body>
     <div id="root"></div>

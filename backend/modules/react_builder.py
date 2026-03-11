@@ -87,18 +87,38 @@ def _html_escape_attr(value: str) -> str:
     )
 
 
+def _build_favicon_data_uri(letter: str, color: str) -> str:
+    """Build a base64-encoded SVG favicon data URI (safe for HTML attributes)."""
+    import base64
+
+    # Sanitize: only use alphanumeric first letter, fallback to "B"
+    safe_letter = letter if letter.isalnum() else "B"
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        f'<circle cx="50" cy="50" r="50" fill="{color}"/>'
+        f'<text x="50" y="50" text-anchor="middle" dy=".35em" '
+        f'font-size="50" font-weight="bold" fill="white">{safe_letter}</text>'
+        f'</svg>'
+    )
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
 def _substitute_placeholders(build_dir: Path, content: dict, business_data: dict) -> None:
     """Replace {{PLACEHOLDER}} tokens in template config files."""
+    color_primary = content.get("color_primary", "#2563EB")
+    favicon_letter = business_data.get("name", "B")[0].upper()
+
     replacements = {
         "{{SEO_TITLE}}": _html_escape_attr(content.get("seo_title", "Business Website")),
         "{{SEO_DESCRIPTION}}": _html_escape_attr(content.get("seo_description", "Professional business website")),
         "{{OG_TITLE}}": _html_escape_attr(content.get("og_title", content.get("seo_title", "Business Website"))),
         "{{OG_DESCRIPTION}}": _html_escape_attr(content.get("og_description", content.get("seo_description", ""))),
-        "{{COLOR_PRIMARY}}": content.get("color_primary", "#2563EB"),
+        "{{COLOR_PRIMARY}}": color_primary,
         "{{COLOR_SECONDARY}}": content.get("color_secondary", "#F59E0B"),
         "{{FONT_HEADING}}": content.get("font_heading", "Inter"),
         "{{FONT_BODY}}": content.get("font_body", "Inter"),
-        "{{FAVICON_LETTER}}": business_data.get("name", "B")[0].upper(),
+        "{{FAVICON_DATA_URI}}": _build_favicon_data_uri(favicon_letter, color_primary),
     }
 
     # URL-encoded font names for Google Fonts link in index.html
