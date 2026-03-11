@@ -38,13 +38,13 @@
         :style="{ width: store.previewWidth, maxWidth: '100%' }"
       >
         <iframe
-          v-if="html"
-          :srcdoc="html"
+          v-if="previewHtml"
+          :srcdoc="previewHtml"
           class="w-full bg-white"
           :style="{ height: frameHeight, border: 'none' }"
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts allow-same-origin allow-popups"
         ></iframe>
-        <div v-else class="flex items-center justify-center h-96 text-gray-500">
+        <div v-if="!previewHtml" class="flex items-center justify-center h-96 text-gray-500">
           No preview available
         </div>
       </div>
@@ -71,5 +71,35 @@ const frameHeight = computed(() => {
     case 'tablet': return '600px'
     default: return '700px'
   }
+})
+
+// Inject a script that intercepts link clicks inside the preview iframe
+// - Hash links (#about) scroll smoothly within the iframe
+// - External links open in a new tab instead of navigating the iframe away
+const PREVIEW_LINK_HANDLER = `<script>
+document.addEventListener('click', function(e) {
+  var link = e.target.closest('a');
+  if (!link) return;
+  var href = link.getAttribute('href');
+  if (!href) return;
+  e.preventDefault();
+  if (href.startsWith('#')) {
+    var target = document.querySelector(href);
+    if (target) target.scrollIntoView({ behavior: 'smooth' });
+  } else if (href.startsWith('http') || href.startsWith('//')) {
+    window.open(href, '_blank', 'noopener');
+  }
+});
+// Also intercept form submissions
+document.addEventListener('submit', function(e) { e.preventDefault(); });
+<\/script>`
+
+const previewHtml = computed(() => {
+  if (!props.html) return null
+  // Inject the link handler before </body>
+  if (props.html.includes('</body>')) {
+    return props.html.replace('</body>', PREVIEW_LINK_HANDLER + '</body>')
+  }
+  return props.html + PREVIEW_LINK_HANDLER
 })
 </script>
