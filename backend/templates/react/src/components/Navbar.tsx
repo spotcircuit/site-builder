@@ -42,9 +42,9 @@ export default function Navbar({ data }: NavbarProps) {
                        hover:opacity-80 transition-opacity duration-200"
           >
             {logoUrl && (
-              <img src={logoUrl} alt={data.name} className="h-8 w-auto" />
+              <img src={logoUrl} alt={data.business_name || data.name} className="h-8 w-auto" />
             )}
-            {data.name || 'Our Business'}
+            {data.business_name || data.name || 'Our Business'}
           </a>
 
           {/* ── Desktop Links ── */}
