@@ -170,6 +170,7 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
         if (existing) {
           existing.status = 'completed'
           existing.html = job.result.html
+          existing.businessName = job.result.business_name || resultBusinessName.value
           existing.deployUrl = job.result.deploy_url
           existing.deployProvider = job.result.deploy_provider
           existing.title = job.result.title
@@ -258,8 +259,11 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     jobId.value = null
   }
 
-  function viewSite(site: GeneratedSite) {
-    if (site.status === 'completed' && site.html) {
+  async function viewSite(site: GeneratedSite) {
+    if (site.status !== 'completed') return
+
+    // If HTML is in memory, show it directly
+    if (site.html) {
       resultHtml.value = site.html
       resultTitle.value = site.title
       resultBusinessName.value = site.businessName
@@ -267,6 +271,24 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
       resultDeployProvider.value = site.deployProvider
       jobId.value = site.jobId
       phase.value = 'result'
+      return
+    }
+
+    // Otherwise fetch from backend (HTML is stripped from localStorage)
+    try {
+      const job = await getJobStatus(site.jobId)
+      if (job.status === 'completed' && job.result?.html) {
+        resultHtml.value = job.result.html
+        resultTitle.value = job.result.title || site.title
+        resultBusinessName.value = job.result.business_name || site.businessName
+        resultDeployUrl.value = job.result.deploy_url || site.deployUrl
+        resultDeployProvider.value = job.result.deploy_provider || site.deployProvider
+        jobId.value = site.jobId
+        phase.value = 'result'
+      }
+    } catch {
+      // Backend doesn't have this job anymore (server restarted)
+      // Can't preview without HTML — do nothing
     }
   }
 

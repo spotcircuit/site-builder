@@ -1,30 +1,19 @@
 <template>
-  <div v-if="store.siteHistory.length > 0" class="mt-12">
+  <div v-if="completedSites.length > 0" class="mt-12">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-lg font-semibold text-white">Generated Sites</h3>
-      <span class="text-sm text-gray-500">{{ store.siteHistory.length }} site{{ store.siteHistory.length === 1 ? '' : 's' }}</span>
+      <span class="text-sm text-gray-500">{{ completedSites.length }} site{{ completedSites.length === 1 ? '' : 's' }}</span>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       <div
-        v-for="site in store.siteHistory"
+        v-for="site in completedSites"
         :key="site.jobId"
         class="bg-gray-800/50 rounded-xl border border-gray-700/50 overflow-hidden hover:border-gray-600 transition-all group"
       >
-        <!-- Thumbnail / Status -->
+        <!-- Thumbnail -->
         <div class="h-32 bg-gray-900 flex items-center justify-center relative">
-          <div v-if="site.status === 'generating'" class="text-center">
-            <svg class="animate-spin w-8 h-8 text-cyan-400 mx-auto mb-2" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" />
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-            </svg>
-            <span class="text-xs text-gray-500">Generating...</span>
-          </div>
-          <div v-else-if="site.status === 'failed'" class="text-center">
-            <span class="text-2xl">&#10060;</span>
-            <p class="text-xs text-red-400 mt-1">Failed</p>
-          </div>
-          <div v-else class="text-center">
+          <div class="text-center">
             <span class="text-3xl">&#127760;</span>
             <p class="text-xs text-emerald-400 mt-1">Ready</p>
           </div>
@@ -52,13 +41,6 @@
 
           <!-- Actions -->
           <div class="flex gap-2 mt-3">
-            <button
-              v-if="site.status === 'completed'"
-              @click="store.viewSite(site)"
-              class="flex-1 py-1.5 text-xs font-medium rounded-lg bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 transition-all"
-            >
-              Preview
-            </button>
             <a
               v-if="site.deployUrl"
               :href="site.deployUrl"
@@ -75,9 +57,17 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useSiteBuilderStore } from '../stores/siteBuilderStore'
 
 const store = useSiteBuilderStore()
+
+// Only show completed sites with a real business name — hide stale "generating" entries
+const completedSites = computed(() =>
+  store.siteHistory.filter(s =>
+    s.status === 'completed' && s.businessName && s.businessName !== 'Generating...'
+  )
+)
 
 function formatDate(iso: string): string {
   try {
