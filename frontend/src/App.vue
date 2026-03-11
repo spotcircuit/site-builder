@@ -70,20 +70,7 @@
                 </select>
               </div>
 
-              <!-- Deploy Target -->
-              <div>
-                <label class="block text-sm font-medium text-gray-300 mb-2">Deploy To</label>
-                <select
-                  v-model="store.deployTarget"
-                  class="w-full px-4 py-3 rounded-xl bg-gray-900/50 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
-                  :disabled="store.isGenerating"
-                >
-                  <option value="auto">Auto-detect</option>
-                  <option value="cloudflare">Cloudflare Pages</option>
-                  <option value="vercel">Vercel</option>
-                  <option value="none">No Deploy</option>
-                </select>
-              </div>
+              <!-- Deploy target is always auto-detect -->
             </div>
 
             <!-- Generate Button -->
