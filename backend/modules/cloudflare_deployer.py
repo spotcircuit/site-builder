@@ -71,8 +71,8 @@ async def deploy_to_cloudflare(
     Returns:
         CloudflareDeployResult with live URL
     """
-    token = os.environ.get("CLOUDFLARE_API_TOKEN")
-    account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+    token = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+    account_id = (os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
 
     if not token or not account_id:
         raise ValueError(

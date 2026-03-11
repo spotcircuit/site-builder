@@ -6,6 +6,10 @@ export default function Footer({ data }: { data: any }) {
     { label: 'Contact', href: '#contact' },
   ]
 
+  // External dofollow links — pass SEO link juice
+  const socials = data.website_data?.social_links || data.social_links || {}
+  const socialEntries = Object.entries(socials).filter(([, url]) => !!url)
+
   return (
     <footer className="bg-gray-900 text-gray-400 py-16 px-4">
       <div className="max-w-6xl mx-auto">
@@ -34,6 +38,29 @@ export default function Footer({ data }: { data: any }) {
             </a>
           ))}
         </nav>
+
+        {/* Social dofollow links */}
+        {socialEntries.length > 0 && (
+          <nav className="flex flex-wrap justify-center gap-6 mb-8">
+            {socialEntries.map(([platform, url]) => (
+              <a
+                key={platform}
+                href={url as string}
+                className="text-gray-400 hover:text-white transition-colors duration-200 text-sm font-medium"
+              >
+                {platform.charAt(0).toUpperCase() + platform.slice(1)}
+              </a>
+            ))}
+            {data.website && (
+              <a
+                href={data.website}
+                className="text-gray-400 hover:text-white transition-colors duration-200 text-sm font-medium"
+              >
+                Website
+              </a>
+            )}
+          </nav>
+        )}
 
         {/* Divider */}
         <div className="border-t border-gray-800 my-8" />

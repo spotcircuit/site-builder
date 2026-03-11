@@ -9,6 +9,7 @@ All progress is streamed to connected clients via WebSocket.
 
 import asyncio
 import json
+import logging
 import os
 import traceback
 import uuid
@@ -22,6 +23,7 @@ from pydantic import BaseModel
 
 from modules.maps_url_parser import parse_maps_url, ParsedMapsUrl
 from modules.maps_scraper import scrape_business_from_maps, BusinessData
+from modules.website_scraper import scrape_website, WebsiteData
 from modules.site_generator import generate_site, generate_site_content, GeneratedSite, SiteContent
 from modules.react_builder import build_react_site, cleanup_build, ReactBuildResult
 from modules.vercel_deployer import deploy_to_vercel, is_vercel_configured
@@ -33,6 +35,8 @@ from modules.websocket_manager import get_websocket_manager
 # Environment
 # ---------------------------------------------------------------------------
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 PORT = int(os.getenv("SITE_BUILDER_PORT", "9405"))
 HOST = os.getenv("SITE_BUILDER_HOST", "0.0.0.0")
@@ -183,6 +187,36 @@ async def run_generation_pipeline(
             data={"job_id": job_id, "business_name": business_data.name},
         )
 
+        # ── Step 2.5: Scrape the business website for branding ──────────
+        website_data: Optional[WebsiteData] = None
+        if business_data.website:
+            try:
+                await ws_manager.broadcast_step(
+                    step="scraping_website",
+                    status="started",
+                    message=f"Scraping business website: {business_data.website}",
+                    data={"job_id": job_id},
+                )
+                website_data = await scrape_website(business_data.website)
+                await ws_manager.broadcast_step(
+                    step="scraping_website",
+                    status="completed",
+                    message=(
+                        f"Got {len(website_data.images)} images, "
+                        f"{len(website_data.brand_colors)} colors, "
+                        f"{len(website_data.social_links)} social links from website"
+                    ),
+                    data={"job_id": job_id},
+                )
+            except Exception as exc:
+                logger.warning("Website scrape failed (non-fatal): %s", exc)
+                await ws_manager.broadcast_step(
+                    step="scraping_website",
+                    status="completed",
+                    message="Website scraping skipped (couldn't access site)",
+                    data={"job_id": job_id},
+                )
+
         # ── Step 3: Generate content via Claude ─────────────────────────
         jobs[job_id]["status"] = "generating_content"
         jobs[job_id]["step"] = "generating_content"
@@ -202,6 +236,9 @@ async def run_generation_pipeline(
             )
 
         biz_dict = business_data.model_dump()
+        # Merge website scrape data so the AI can use branding, about text, etc.
+        if website_data:
+            biz_dict["website_data"] = website_data.model_dump()
         content: SiteContent = await generate_site_content(
             business_data=biz_dict,
             callback=_generator_callback,
@@ -535,9 +572,16 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "site-builder",
+        "version": "1.1.0",
         "websocket_connections": len(ws_manager.active_connections),
         "active_jobs": len(jobs),
         "timestamp": datetime.now().isoformat(),
+        "services": {
+            "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY")),
+            "cloudflare": is_cloudflare_configured(),
+            "vercel": is_vercel_configured(),
+            "gemini": is_gemini_configured(),
+        },
     }
 
 

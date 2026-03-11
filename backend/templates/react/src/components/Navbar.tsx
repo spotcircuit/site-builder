@@ -14,6 +14,23 @@ export default function Navbar({ data }: NavbarProps) {
     { label: 'Contact', href: '#contact' },
   ]
 
+  // External dofollow links — pass SEO link juice to the business's real properties
+  const externalLinks: { label: string; href: string }[] = []
+  if (data.website) {
+    externalLinks.push({ label: 'Website', href: data.website })
+  }
+  const socials = data.website_data?.social_links || data.social_links || {}
+  Object.entries(socials).forEach(([platform, url]) => {
+    if (url) {
+      externalLinks.push({
+        label: platform.charAt(0).toUpperCase() + platform.slice(1),
+        href: url as string,
+      })
+    }
+  })
+
+  const logoUrl = data.website_data?.logo_url || data.logo_url
+
   return (
     <nav className="sticky top-0 z-50 bg-white/95 backdrop-blur-md shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -21,15 +38,33 @@ export default function Navbar({ data }: NavbarProps) {
           {/* ── Brand ── */}
           <a
             href="#"
-            className="text-2xl font-bold font-heading text-primary tracking-tight
+            className="flex items-center gap-2 text-2xl font-bold font-heading text-primary tracking-tight
                        hover:opacity-80 transition-opacity duration-200"
           >
+            {logoUrl && (
+              <img src={logoUrl} alt={data.name} className="h-8 w-auto" />
+            )}
             {data.name || 'Our Business'}
           </a>
 
           {/* ── Desktop Links ── */}
           <div className="hidden md:flex items-center gap-1">
             {navLinks.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                className="relative px-4 py-2 text-sm font-medium text-gray-600
+                           hover:text-primary transition-colors duration-200
+                           after:absolute after:bottom-0 after:left-1/2 after:-translate-x-1/2
+                           after:w-0 after:h-0.5 after:bg-primary after:rounded-full
+                           after:transition-all after:duration-300
+                           hover:after:w-2/3"
+              >
+                {link.label}
+              </a>
+            ))}
+            {/* External dofollow links — no rel="nofollow" so search engines follow them */}
+            {externalLinks.map((link) => (
               <a
                 key={link.href}
                 href={link.href}
@@ -99,6 +134,18 @@ export default function Navbar({ data }: NavbarProps) {
       >
         <div className="px-4 pb-4 pt-1 space-y-1 border-t border-gray-100 bg-white">
           {navLinks.map((link) => (
+            <a
+              key={link.href}
+              href={link.href}
+              onClick={() => setMenuOpen(false)}
+              className="block px-4 py-3 text-sm font-medium text-gray-600 rounded-lg
+                         hover:text-primary hover:bg-primary/5
+                         transition-colors duration-200"
+            >
+              {link.label}
+            </a>
+          ))}
+          {externalLinks.map((link) => (
             <a
               key={link.href}
               href={link.href}

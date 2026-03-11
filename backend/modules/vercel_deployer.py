@@ -93,11 +93,11 @@ async def deploy_to_vercel(
         ValueError: If VERCEL_TOKEN is not set
         httpx.HTTPStatusError: If Vercel API returns an error
     """
-    token = os.environ.get("VERCEL_TOKEN")
+    token = (os.environ.get("VERCEL_TOKEN") or "").strip()
     if not token:
         raise ValueError("VERCEL_TOKEN environment variable is not set")
 
-    team_id = os.environ.get("VERCEL_TEAM_ID")
+    team_id = (os.environ.get("VERCEL_TEAM_ID") or "").strip() or None
     project_name = _sanitize_project_name(business_name, job_id)
 
     if callback:

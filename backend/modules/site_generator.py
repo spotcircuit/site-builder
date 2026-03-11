@@ -674,6 +674,65 @@ def render_site_html(
                     </div>
                 </div>"""
 
+    # Build external dofollow links for nav and footer
+    # These pass SEO link juice to the business's real web properties
+    website_url = _escape_html(business_data.get("website", ""))
+    website_data = business_data.get("website_data", {})
+    social_links = website_data.get("social_links", {}) if website_data else {}
+    logo_url = (website_data.get("logo_url", "") or "") if website_data else ""
+
+    # Nav external links (dofollow — no rel="nofollow")
+    nav_external_links = ""
+    if website_url:
+        nav_external_links += (
+            f'<a href="{website_url}" class="hover:text-gray-900 transition-colors">Website</a>'
+        )
+    for platform, url in social_links.items():
+        icon = {
+            "facebook": "&#xf09a;",
+            "instagram": "&#xf16d;",
+            "twitter": "&#xf099;",
+            "youtube": "&#xf167;",
+            "tiktok": "&#xe07b;",
+            "linkedin": "&#xf0e1;",
+            "yelp": "&#xf1e9;",
+        }.get(platform, "")
+        label = _escape_html(platform.capitalize())
+        safe_url = _escape_html(str(url))
+        nav_external_links += f'<a href="{safe_url}" class="hover:text-gray-900 transition-colors">{label}</a>'
+
+    # Footer social links (dofollow with visible icons)
+    footer_social_html = ""
+    if social_links:
+        social_items = ""
+        for platform, url in social_links.items():
+            label = _escape_html(platform.capitalize())
+            safe_url = _escape_html(str(url))
+            social_items += (
+                f'<a href="{safe_url}" class="hover:text-white transition-colors">{label}</a>'
+            )
+        footer_social_html = f"""
+            <div class="flex justify-center space-x-4 mb-4 text-sm">
+                {social_items}
+            </div>"""
+
+    # Use logo from website scrape if available
+    nav_logo_html = ""
+    if logo_url:
+        safe_logo = _escape_html(logo_url)
+        nav_logo_html = (
+            f'<a href="#" class="flex items-center space-x-2">'
+            f'<img src="{safe_logo}" alt="{business_name}" class="h-8 w-auto" />'
+            f'<span class="text-2xl font-bold" style="font-family: \'{content.font_heading}\', sans-serif; '
+            f'color: {content.color_primary};">{business_name}</span></a>'
+        )
+    else:
+        nav_logo_html = (
+            f'<a href="#" class="text-2xl font-bold" '
+            f'style="font-family: \'{content.font_heading}\', sans-serif; '
+            f'color: {content.color_primary};">{business_name}</a>'
+        )
+
     # Assemble the complete HTML page
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -719,15 +778,13 @@ def render_site_html(
     <!-- ════════════ NAVIGATION ════════════ -->
     <nav class="bg-white shadow-sm sticky top-0 z-50">
         <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-            <a href="#" class="text-2xl font-bold"
-               style="font-family: '{content.font_heading}', sans-serif; color: {content.color_primary};">
-                {business_name}
-            </a>
+            {nav_logo_html}
             <div class="hidden md:flex space-x-8 text-sm font-medium text-gray-600">
                 <a href="#about" class="hover:text-gray-900 transition-colors">About</a>
                 <a href="#services" class="hover:text-gray-900 transition-colors">Services</a>
                 <a href="#testimonials" class="hover:text-gray-900 transition-colors">Testimonials</a>
                 <a href="#contact" class="hover:text-gray-900 transition-colors">Contact</a>
+                {nav_external_links}
             </div>
             <a href="#contact"
                class="btn-primary text-white px-5 py-2 rounded-lg text-sm font-semibold">
@@ -873,6 +930,7 @@ def render_site_html(
                 <a href="#testimonials" class="hover:text-white transition-colors">Testimonials</a>
                 <a href="#contact" class="hover:text-white transition-colors">Contact</a>
             </div>
+            {footer_social_html}
             <p class="text-xs text-gray-500">
                 &copy; {business_name}. All rights reserved.
             </p>

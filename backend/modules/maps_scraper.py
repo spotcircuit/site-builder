@@ -139,7 +139,8 @@ EXTRACT_PROFILE_JS = """() => {
 
     // Category - try specific selectors, then look for text with · or ending patterns
     let categoryText = '';
-    const catElem = document.querySelector('button[jsaction*="pane.rating.category"]') ||
+    const catElem = document.querySelector('button.DkEaL') ||
+                    document.querySelector('button[jsaction*="pane.rating.category"]') ||
                     document.querySelector('[data-value="category"]') ||
                     document.querySelector('span[class*="category"]');
     if (catElem) {
@@ -350,6 +351,85 @@ EXTRACT_PROFILE_JS = """() => {
     return data;
 }"""
 
+# ---------------------------------------------------------------------------
+# JavaScript to extract reviews from the Reviews tab
+# Uses .MyEned / .wiI7pd classes for the actual review body text.
+# Deduplicates by data-review-id.
+# ---------------------------------------------------------------------------
+EXTRACT_REVIEWS_JS = """(maxReviews) => {
+    const reviews = [];
+    const seen = new Set();
+    const containers = document.querySelectorAll("[data-review-id]");
+
+    containers.forEach(container => {
+        if (reviews.length >= maxReviews) return;
+
+        const rid = container.getAttribute("data-review-id");
+        if (seen.has(rid)) return;
+        seen.add(rid);
+
+        const review = {};
+
+        // Author — .d4r55 or first link inside .WNxzHc
+        const authorEl = container.querySelector(".d4r55, .WNxzHc a");
+        if (authorEl) review.author = authorEl.innerText.trim();
+
+        // Star rating from aria-label
+        const ratingEl = container.querySelector('[role="img"][aria-label*="star"]');
+        if (ratingEl) {
+            const m = ratingEl.getAttribute("aria-label").match(/(\\d)/);
+            if (m) review.rating = parseInt(m[1]);
+        }
+
+        // Time (e.g. "3 months ago")
+        const timeEl = container.querySelector(".rsqaWe");
+        if (timeEl) review.time = timeEl.innerText.trim();
+
+        // ── Actual review text ──
+        // Google wraps the written review in .MyEned or .wiI7pd
+        const textEl = container.querySelector(".wiI7pd, .MyEned");
+        if (textEl) {
+            let txt = textEl.innerText.trim();
+            // Strip trailing structured metadata that sometimes leaks in
+            const metaCut = txt.search(/\\n(Meal type|Price per person|Food:|Service:|Atmosphere:|Noise level|Group size|Parking|Recommended|Vegetarian)/);
+            if (metaCut > 0) txt = txt.substring(0, metaCut).trim();
+            review.text = txt;
+        }
+
+        // Fallback: find the longest natural-language span/div
+        // (skip structured metadata like "Meal type", "Food:", etc.)
+        if (!review.text) {
+            let best = "";
+            container.querySelectorAll("span, div").forEach(el => {
+                const t = (el.innerText || "").trim();
+                if (t.length < 40) return;
+                // Skip structured review metadata
+                if (/Meal type|Food:|Price per|Atmosphere:|Parking|Noise level|Recommended|Service:|Vegetarian|Group size/i.test(t)) return;
+                const colonCount = (t.match(/:/g) || []).length;
+                const wordCount = t.split(" ").length;
+                if (wordCount > 5 && colonCount < 3 && t.length > best.length) {
+                    best = t;
+                }
+            });
+            if (best) review.text = best;
+        }
+
+        // Helpful count
+        const helpfulEl = container.querySelector("[aria-label*=Helpful]");
+        if (helpfulEl) {
+            const hm = helpfulEl.getAttribute("aria-label").match(/(\\d+)/);
+            if (hm) review.helpful = parseInt(hm[1]);
+        }
+
+        // Only include reviews with actual written text (> 20 chars)
+        if (review.text && review.text.length > 20) {
+            reviews.push(review);
+        }
+    });
+
+    return reviews;
+}"""
+
 
 def _parse_hours_from_aria_label(hours_raw: str) -> dict[str, str]:
     """Parse an hours aria-label string like 'Hours: Monday, 9 AM to 5 PM; Tuesday, ...'
@@ -529,7 +609,7 @@ async def extract_photos(page: Page, max_photos: int = 8) -> list[str]:
     return photos
 
 
-async def extract_reviews(page: Page, max_reviews: int = 5) -> list[dict[str, Any]]:
+async def extract_reviews(page: Page, max_reviews: int = 15) -> list[dict[str, Any]]:
     """
     Click the Reviews tab, scroll to load content, and extract review data.
     Uses the proven getrankedlocal production selectors.
@@ -560,12 +640,12 @@ async def extract_reviews(page: Page, max_reviews: int = 5) -> list[dict[str, An
         await reviews_tab.click()
         await asyncio.sleep(1.5)
 
-        # Scroll the review feed to load more reviews
+        # Scroll the review feed to load more reviews — scroll 5 batches
         review_feed = await page.query_selector(
-            '[role="feed"], .m6QErb[aria-label*="Reviews"]'
+            '[role="feed"], .m6QErb[aria-label*="Reviews"], .m6QErb.DxyBCb'
         )
         if review_feed:
-            for _ in range(3):
+            for _ in range(8):
                 await review_feed.evaluate('(element) => element.scrollTop = element.scrollHeight')
                 await asyncio.sleep(1)
 
@@ -574,128 +654,15 @@ async def extract_reviews(page: Page, max_reviews: int = 5) -> list[dict[str, An
             'button.w8nwRe, button[aria-label="See more"], '
             'button.M77dve, a.review-more-link'
         )
-        for btn in more_buttons[:max_reviews + 5]:
+        for btn in more_buttons[:max_reviews + 10]:
             try:
                 await btn.click()
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.15)
             except Exception:
                 pass
 
-        # Extract review data using production JS
-        reviews = await page.evaluate(f"""(maxReviews) => {{
-            const reviews = [];
-
-            // Find review containers - production selectors
-            const reviewElements = document.querySelectorAll(
-                '[data-review-id], [jslog*="review"], div[aria-label*="stars"][role="img"]'
-            );
-            const reviewContainers = [];
-
-            // Walk up to find parent container with enough content
-            reviewElements.forEach(elem => {{
-                let container = elem;
-                while (container && container.parentElement) {{
-                    const text = container.innerText;
-                    if (text && text.length > 50 &&
-                        (text.includes('★') || text.includes('star') || text.includes('ago'))) {{
-                        if (!reviewContainers.includes(container)) {{
-                            reviewContainers.push(container);
-                        }}
-                        break;
-                    }}
-                    container = container.parentElement;
-                }}
-            }});
-
-            // Also try button-based reviews
-            const reviewButtons = document.querySelectorAll(
-                'button[aria-label*="stars"][aria-label*="ago"]'
-            );
-            reviewButtons.forEach(btn => {{
-                const container = btn.closest('[role="article"], div[jslog]');
-                if (container && !reviewContainers.includes(container)) {{
-                    reviewContainers.push(container);
-                }}
-            }});
-
-            // Process each review container
-            reviewContainers.forEach(container => {{
-                if (reviews.length >= maxReviews) return;
-
-                const review = {{}};
-
-                // Rating from aria-label
-                const ratingElem = container.querySelector('[aria-label*="star"], [aria-label*="Star"]');
-                if (ratingElem) {{
-                    const label = ratingElem.getAttribute('aria-label');
-                    const ratingMatch = label.match(/(\\d)\\s*[Ss]tar/);
-                    if (ratingMatch) {{
-                        review.rating = parseInt(ratingMatch[1]);
-                    }}
-                }}
-
-                // Author and time
-                const authorTimeElems = container.querySelectorAll('div, span');
-                authorTimeElems.forEach(elem => {{
-                    const text = elem.innerText;
-                    if (text && text.includes(' ago') && !review.time) {{
-                        const lines = text.split('\\n');
-                        if (lines.length >= 2) {{
-                            review.author = lines[0].trim();
-                            review.time = lines[1].trim();
-                        }} else if (lines.length === 1) {{
-                            review.time = lines[0].trim();
-                        }}
-                    }}
-                }});
-
-                // Review text - look for longest text in jslog elements
-                const textElems = container.querySelectorAll(
-                    'span[jslog], div[jslog], span[class*="review"], div[class*="review"]'
-                );
-                let longestText = '';
-                textElems.forEach(elem => {{
-                    const text = elem.innerText;
-                    if (text && text.length > longestText.length &&
-                        !text.includes(' ago') && !text.includes('★')) {{
-                        longestText = text;
-                    }}
-                }});
-
-                // Fallback: get all text and filter
-                if (!longestText) {{
-                    const allText = container.innerText;
-                    const lines = allText.split('\\n').filter(line =>
-                        line.length > 20 &&
-                        !line.includes(' ago') &&
-                        !line.includes('★') &&
-                        !line.includes('Google') &&
-                        !line.includes('Local Guide')
-                    );
-                    if (lines.length > 0) {{
-                        longestText = lines.join(' ');
-                    }}
-                }}
-
-                review.text = longestText.trim();
-
-                // Helpful count
-                const helpfulElem = container.querySelector('[aria-label*="Helpful"]');
-                if (helpfulElem) {{
-                    const helpfulMatch = helpfulElem.getAttribute('aria-label').match(/(\\d+)/);
-                    if (helpfulMatch) {{
-                        review.helpful = parseInt(helpfulMatch[1]);
-                    }}
-                }}
-
-                // Only add reviews with meaningful text
-                if (review.text && review.text.length > 10) {{
-                    reviews.push(review);
-                }}
-            }});
-
-            return reviews;
-        }}""", max_reviews)
+        # Extract review data — uses .MyEned / .wiI7pd for actual review text
+        reviews = await page.evaluate(EXTRACT_REVIEWS_JS, max_reviews)
 
     except Exception as exc:
         logger.warning("Review extraction failed (non-fatal): %s", exc)
@@ -735,21 +702,30 @@ async def scrape_business_from_maps(
     if not any([place_id, cid, business_name, raw_url]):
         raise ValueError("At least one of raw_url, place_id, cid, or business_name must be provided")
 
-    browser: Optional[Browser] = None
+    context = None
 
     async with async_playwright() as pw:
         try:
-            await _notify(callback, "launching_browser", "Starting headless browser...")
+            await _notify(callback, "launching_browser", "Starting browser...")
 
-            # Use headed mode (headless=False) so Google Maps serves the full
-            # experience with all tabs (Reviews, Photos, etc.). On production
-            # (Railway), Xvfb provides the virtual display. Falls back to
-            # headless if no display is available (local dev).
             import os
             has_display = bool(os.environ.get("DISPLAY"))
             use_headless = not has_display
 
-            browser = await pw.chromium.launch(
+            # ── Use persistent context ──
+            # launch_persistent_context saves cookies/profile across runs.
+            # This is CRITICAL: Google Maps shows the full experience (Reviews,
+            # Photos, Menu tabs) only when the browser has an established Google
+            # session. Without it, Maps serves a "limited view" with only
+            # Overview + About tabs. The persistent profile stores the consent
+            # cookies from visiting google.com first.
+            profile_dir = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)),
+                ".chrome-profile",
+            )
+
+            context = await pw.chromium.launch_persistent_context(
+                profile_dir,
                 headless=use_headless,
                 args=[
                     "--no-sandbox",
@@ -758,41 +734,74 @@ async def scrape_business_from_maps(
                     "--disable-blink-features=AutomationControlled",
                     "--window-size=1920,1080",
                 ],
-            )
-
-            context = await browser.new_context(
                 viewport={"width": 1920, "height": 1080},
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
+                    "Chrome/131.0.0.0 Safari/537.36"
                 ),
                 locale="en-US",
+                timezone_id="America/New_York",
+                permissions=["geolocation"],
             )
-            page = await context.new_page()
 
-            # Build the navigation URL — prefer the original URL since it
-            # contains !1s data segments that reliably load the business panel
+            page = context.pages[0] if context.pages else await context.new_page()
+
+            # ── Establish Google session ──
+            # Visit google.com first to accept cookies and get a session.
+            # This makes Google Maps show the FULL view with all tabs.
+            await page.goto("https://www.google.com/", wait_until="load", timeout=15000)
+            await asyncio.sleep(2)
+
+            # Accept cookie consent if prompted
+            try:
+                consent_btn = await page.query_selector(
+                    'button:has-text("Accept all"), '
+                    'button:has-text("I agree"), '
+                    'button[aria-label="Accept all"]'
+                )
+                if consent_btn:
+                    await consent_btn.click()
+                    await asyncio.sleep(1)
+            except Exception:
+                pass
+
+            # ── Build a SEARCH URL ──
+            # Google Maps resolves search URLs to full place pages with all
+            # tabs (Overview, Menu, Reviews, About). Direct place URLs with
+            # stale data segments often fail or show the limited view.
+            from urllib.parse import quote_plus, unquote
+            import re
+
+            search_query = ""
             if raw_url and "google.com/maps" in raw_url:
-                url = raw_url
-                await _notify(callback, "navigating", "Navigating to business via original Maps URL...")
+                # Extract business name from the URL path segment
+                place_match = re.search(r"/place/([^/@]+)", raw_url)
+                if place_match:
+                    search_query = unquote(place_match.group(1)).replace("+", " ")
+                if not search_query and business_name:
+                    search_query = business_name
+
+            if not search_query and business_name:
+                search_query = business_name
+
+            if search_query:
+                url = f"https://www.google.com/maps/search/{quote_plus(search_query)}"
+                await _notify(callback, "navigating", f"Searching Google Maps for: {search_query}")
             elif cid:
                 url = f"https://www.google.com/maps?cid={cid}"
-                await _notify(callback, "navigating", f"Navigating to business via CID: {cid}")
+                await _notify(callback, "navigating", f"Navigating via CID: {cid}")
             elif place_id:
                 url = f"https://www.google.com/maps/place/?q=place_id:{place_id}"
-                await _notify(callback, "navigating", f"Navigating to business via place_id: {place_id}")
+                await _notify(callback, "navigating", f"Navigating via place_id: {place_id}")
             else:
-                from urllib.parse import quote_plus
-                query = quote_plus(business_name)  # type: ignore[arg-type]
-                url = f"https://www.google.com/maps/search/{query}"
-                await _notify(callback, "navigating", f"Searching Google Maps for: {business_name}")
+                raise ValueError("Could not build a navigation URL")
 
-            # Use wait_until='load' — Google Maps SPA needs full JS load
+            # Navigate to Maps — full JS load needed for SPA
             await page.goto(url, wait_until="load", timeout=45000)
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
 
-            # Handle cookie consent dialog if it appears
+            # Handle cookie consent dialog on Maps if it appears
             try:
                 consent_btn = await page.query_selector(
                     'button[aria-label="Accept all"], '
@@ -801,21 +810,22 @@ async def scrape_business_from_maps(
                 )
                 if consent_btn:
                     await consent_btn.click()
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2)
             except Exception:
                 pass
 
-            # If we searched by name, click the first result
-            if not raw_url and business_name and not cid and not place_id:
-                try:
-                    first_result = await page.query_selector(
-                        '[role="article"], a.hfpxzc, div.Nv2PK a, a[href*="/maps/place/"]'
-                    )
-                    if first_result:
-                        await first_result.click()
-                        await asyncio.sleep(3)
-                except Exception:
-                    pass
+            # If search returned a list instead of auto-resolving, click first result
+            try:
+                first_result = await page.query_selector(
+                    '[role="article"], a.hfpxzc, div.Nv2PK a'
+                )
+                if first_result:
+                    await first_result.click()
+                    await asyncio.sleep(4)
+            except Exception:
+                pass
+
+            logger.info("Resolved URL: %s", page.url)
 
             # Wait for the business profile panel to load
             try:
@@ -827,6 +837,21 @@ async def scrape_business_from_maps(
                 logger.warning("Business heading not found - page may not have loaded fully")
 
             await asyncio.sleep(2)
+
+            # ── Log which tabs are visible (diagnostic) ──
+            tabs_info = await page.evaluate("""() => {
+                const tabs = [];
+                const tabButtons = document.querySelectorAll(
+                    'button[role="tab"], button[aria-label*="Overview"], ' +
+                    'button[aria-label*="Reviews"], button[aria-label*="About"], ' +
+                    'button[aria-label*="Photos"], button[aria-label*="Menu"]'
+                );
+                tabButtons.forEach(btn => {
+                    tabs.push(btn.innerText || btn.getAttribute('aria-label') || 'unknown');
+                });
+                return tabs;
+            }""")
+            logger.info("Available tabs on page: %s", tabs_info)
 
             # Scroll the side panel down to load services, reviews button, etc.
             side_panel = await page.query_selector(
@@ -928,7 +953,7 @@ async def scrape_business_from_maps(
 
             # ---- Extract reviews ----
             await _notify(callback, "extracting_reviews", "Extracting business reviews...")
-            review_data = await extract_reviews(page, max_reviews=5)
+            review_data = await extract_reviews(page, max_reviews=15)
             if review_data:
                 await _notify(
                     callback,
@@ -975,8 +1000,8 @@ async def scrape_business_from_maps(
             raise
 
         finally:
-            if browser:
-                await browser.close()
+            if context:
+                await context.close()
 
 
 if __name__ == "__main__":

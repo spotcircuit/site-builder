@@ -27,3 +27,4 @@ COPY . .
 
 # Railway provides $PORT at runtime
 CMD xvfb-run --auto-servernum uv run uvicorn main:app --host 0.0.0.0 --port ${PORT:-9405}
+# Railway deploy trigger 1773196554

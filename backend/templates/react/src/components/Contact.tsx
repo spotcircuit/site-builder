@@ -93,8 +93,14 @@ export default function Contact({ data }: { data: any }) {
                     data.hours.map((hour: string, index: number) => (
                       <p key={index}>{hour}</p>
                     ))
+                  ) : typeof data.hours === 'object' ? (
+                    Object.entries(data.hours).map(([day, time]) => (
+                      <p key={day}>
+                        <span className="font-medium capitalize">{day}:</span> {time as string}
+                      </p>
+                    ))
                   ) : (
-                    <p>{data.hours}</p>
+                    <p>{String(data.hours)}</p>
                   )}
                 </div>
               </div>
