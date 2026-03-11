@@ -518,7 +518,7 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     errorMessage, errorDetails,
     siteHistory, previewDevice,
     // Editor State
-    editorOpen, editableData, editorDirty, showUnsavedWarning,
+    editorOpen, editableData, savedDataSnapshot, editorDirty, showUnsavedWarning,
     isRebuilding, isGeneratingSection, isRedeploying,
     editorError, iframeRef,
     // Computed
