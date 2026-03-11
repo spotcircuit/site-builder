@@ -39,40 +39,23 @@
             AI-Powered Site Generation
           </div>
           <h2 class="text-4xl md:text-5xl font-bold text-white mb-3 tracking-tight">
-            Paste a Google Maps Link,<br>
+            Search Any Business,<br>
             <span class="bg-gradient-to-r from-cyan-400 to-emerald-400 bg-clip-text text-transparent">Get a Premium Website</span>
           </h2>
           <p class="text-gray-400 text-lg max-w-2xl mx-auto">
-            Turn any business listing into a beautiful, client-ready React website with AI-generated content and images. Deploy instantly to Cloudflare.
+            Find any business by name and generate a beautiful, client-ready React website with AI-generated content and images. Deploy instantly.
           </p>
         </div>
 
         <!-- Input Card -->
         <div class="max-w-3xl mx-auto">
           <div class="bg-gray-800/50 rounded-2xl border border-gray-700/50 p-6 space-y-5">
-            <!-- Maps URL Input -->
-            <div>
-              <label for="maps-url" class="block text-sm font-medium text-gray-300 mb-2">
-                Google Maps URL
-              </label>
-              <div class="relative">
-                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </div>
-                <input
-                  id="maps-url"
-                  v-model="store.mapsUrl"
-                  type="url"
-                  placeholder="https://www.google.com/maps/place/Business+Name/..."
-                  class="w-full pl-12 pr-4 py-3.5 rounded-xl bg-gray-900/50 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-base transition-all"
-                  :disabled="store.isGenerating"
-                  @keydown.enter="store.startGeneration()"
-                />
-              </div>
-            </div>
+            <!-- Business Search (Places Autocomplete) -->
+            <PlacesAutocomplete
+              :disabled="store.isGenerating"
+              @select="onPlaceSelect"
+              @clear="onPlaceClear"
+            />
 
             <div class="grid grid-cols-2 gap-4">
               <!-- Template -->
@@ -267,11 +250,20 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useSiteBuilderStore } from './stores/siteBuilderStore'
 import DevicePreview from './components/DevicePreview.vue'
+import PlacesAutocomplete from './components/PlacesAutocomplete.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
 import SiteHistory from './components/SiteHistory.vue'
 import SeoScorePanel from './components/SeoScorePanel.vue'
 
 const store = useSiteBuilderStore()
+
+function onPlaceSelect(place: { name: string; address: string; placeId: string | null; mapsUrl: string }) {
+  store.mapsUrl = place.mapsUrl
+}
+
+function onPlaceClear() {
+  store.mapsUrl = ''
+}
 
 onMounted(() => {
   store.initWebSocket()

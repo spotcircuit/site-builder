@@ -133,6 +133,7 @@ def _generate_data_json(
     }
 
     # Use real Google reviews as testimonials if available (priority over AI-generated)
+    # Only include 4-5 star reviews to present the business positively
     real_reviews = business_data.get("reviews") or []
     if real_reviews:
         data["testimonials"] = [
@@ -144,7 +145,7 @@ def _generate_data_json(
                 "verified": True,
             }
             for r in real_reviews
-            if r.get("text")
+            if r.get("text") and (r.get("rating") or 5) >= 4
         ]
 
     # Inject AI-generated image paths

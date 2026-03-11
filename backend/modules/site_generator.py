@@ -323,19 +323,20 @@ def _build_content_prompt(business_data: dict) -> str:
             services_str = str(services)
         parts.append(f"Services Offered: {services_str}")
 
-    # Reviews
+    # Reviews — only include 4-5 star reviews for the generated site
     if business_data.get("reviews"):
         reviews = business_data["reviews"]
         if isinstance(reviews, list):
-            parts.append(f"\nCustomer Reviews ({len(reviews)} total):")
-            for i, review in enumerate(reviews[:10], 1):
-                if isinstance(review, dict):
-                    author = review.get("author", "Anonymous")
-                    rating = review.get("rating", "N/A")
-                    text = review.get("text", "")
-                    parts.append(f"  {i}. {author} ({rating} stars): {text[:300]}")
-                else:
-                    parts.append(f"  {i}. {str(review)[:300]}")
+            good_reviews = [
+                r for r in reviews
+                if isinstance(r, dict) and (r.get("rating") or 5) >= 4
+            ]
+            parts.append(f"\nCustomer Reviews ({len(good_reviews)} positive reviews of {len(reviews)} total):")
+            for i, review in enumerate(good_reviews[:10], 1):
+                author = review.get("author", "Anonymous")
+                rating = review.get("rating", "N/A")
+                text = review.get("text", "")
+                parts.append(f"  {i}. {author} ({rating} stars): {text[:300]}")
 
     # Rating
     if business_data.get("rating"):

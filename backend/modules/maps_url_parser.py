@@ -198,13 +198,18 @@ def _extract_coordinates(url: str) -> tuple[Optional[float], Optional[float]]:
 
 
 def _extract_business_name(url: str) -> Optional[str]:
-    """Extract and decode the business name from /place/Business+Name/."""
+    """Extract and decode the business name from /place/Business+Name/ or /maps/search/query."""
     match = _PLACE_NAME_PATTERN.search(url)
     if match:
         raw_name = match.group(1)
-        # URL decode: + -> space, %XX -> char
         decoded = unquote_plus(raw_name)
-        # Clean up any remaining artifacts
+        decoded = decoded.strip()
+        if decoded:
+            return decoded
+    # Also try /maps/search/ URLs (from Places Autocomplete)
+    search_match = re.search(r"/maps/search/([^?#]+)", url)
+    if search_match:
+        decoded = unquote_plus(search_match.group(1))
         decoded = decoded.strip()
         if decoded:
             return decoded
