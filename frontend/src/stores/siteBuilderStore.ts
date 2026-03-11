@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, reactive, computed } from 'vue'
-import { generateSite, getJobStatus, getDownloadUrl } from '../services/api'
+import { generateSite, getJobStatus, getDownloadUrl, deleteDeployedSite } from '../services/api'
 import { wsService } from '../services/websocket'
 
 export interface PipelineStep {
@@ -292,7 +292,22 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     }
   }
 
-  function deleteSite(jobId: string) {
+  async function deleteSite(jobId: string) {
+    const site = siteHistory.value.find(s => s.jobId === jobId)
+
+    // Delete from Cloudflare/Vercel if deployed
+    if (site?.deployUrl) {
+      try {
+        // Extract project name from URL: https://site-xxx.pages.dev -> site-xxx
+        const match = site.deployUrl.match(/https?:\/\/([^.]+)\.pages\.dev/)
+        if (match) {
+          await deleteDeployedSite(match[1])
+        }
+      } catch {
+        // Non-fatal — still remove from local history
+      }
+    }
+
     siteHistory.value = siteHistory.value.filter(s => s.jobId !== jobId)
     saveSiteHistory()
   }

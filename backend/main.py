@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import traceback
 import uuid
 from datetime import datetime
@@ -591,6 +592,42 @@ async def download_generated_site(job_id: str):
             "Content-Disposition": f'attachment; filename="{safe_name}.html"',
         },
     )
+
+
+@app.delete("/api/site/{project_name}")
+async def delete_deployed_site(project_name: str):
+    """Delete a deployed site from Cloudflare Pages or Vercel."""
+    import httpx
+
+    token = (os.environ.get("CLOUDFLARE_API_TOKEN") or "").strip()
+    account_id = (os.environ.get("CLOUDFLARE_ACCOUNT_ID") or "").strip()
+
+    if not token or not account_id:
+        raise HTTPException(status_code=500, detail="Cloudflare not configured")
+
+    # Sanitize project name to prevent path traversal
+    if not re.match(r'^[a-z0-9-]+$', project_name):
+        raise HTTPException(status_code=400, detail="Invalid project name")
+
+    api_url = (
+        f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
+        f"/pages/projects/{project_name}"
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.delete(api_url, headers=headers)
+        data = resp.json()
+
+    if data.get("success"):
+        return {"status": "deleted", "project_name": project_name}
+
+    errors = data.get("errors", [])
+    # Already gone is fine
+    if any(e.get("code") == 8000007 for e in errors):
+        return {"status": "already_deleted", "project_name": project_name}
+
+    raise HTTPException(status_code=500, detail=f"Delete failed: {errors}")
 
 
 @app.get("/health")

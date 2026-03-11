@@ -27,3 +27,10 @@ export async function getJobStatus(jobId: string) {
 export function getDownloadUrl(jobId: string) {
   return `${API_BASE}/api/job/${jobId}/download`
 }
+
+export async function deleteDeployedSite(projectName: string) {
+  const res = await fetch(`${API_BASE}/api/site/${projectName}`, {
+    method: 'DELETE',
+  })
+  return res.json()
+}
