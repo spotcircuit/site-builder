@@ -32,7 +32,7 @@ MAX_CONCURRENT_GLOBAL = int(os.environ.get("MAX_CONCURRENT_GLOBAL", "10"))
 
 # Cloudflare Turnstile (optional — disabled if not configured)
 TURNSTILE_SECRET = os.environ.get("TURNSTILE_SECRET_KEY", "")
-TURNSTILE_ENABLED = bool(TURNSTILE_SECRET)
+TURNSTILE_ENABLED = TURNSTILE_SECRET.startswith("0x")  # Real keys start with 0x
 TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
 # ---------------------------------------------------------------------------
