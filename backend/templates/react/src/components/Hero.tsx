@@ -21,7 +21,7 @@ export default function Hero({ data }: HeroProps) {
   const heroImage = firstPhoto || websiteHeroImage || aiHeroImage
   const video = parseVideoUrl(data.hero_video_url || '')
 
-  const gradientFallback: React.CSSProperties = {
+  const gradientFallback: Record<string, string> = {
     background: `linear-gradient(135deg, var(--tw-color-primary, ${data.color_primary || '#2563EB'}) 0%, var(--tw-color-secondary, ${data.color_secondary || '#7C3AED'}) 100%)`,
   }
 
