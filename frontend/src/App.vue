@@ -143,11 +143,12 @@
 
             <!-- Cloudflare Turnstile (anti-abuse) -->
             <div
-              v-if="turnstileSiteKey"
+              v-if="turnstileSiteKey && !turnstileFailed"
               ref="turnstileRef"
               class="cf-turnstile flex justify-center"
               :data-sitekey="turnstileSiteKey"
               data-callback="onTurnstileSuccess"
+              data-error-callback="onTurnstileError"
               data-theme="dark"
               data-size="flexible"
             ></div>
@@ -155,7 +156,7 @@
             <!-- Generate Button -->
             <button
               @click="store.startGeneration()"
-              :disabled="!store.canGenerate || (turnstileSiteKey && !store.turnstileToken)"
+              :disabled="!store.canGenerate || (turnstileSiteKey && !turnstileFailed && !store.turnstileToken)"
               class="w-full py-4 rounded-xl font-bold text-lg transition-all duration-200 flex items-center justify-center gap-3"
               :class="
                 !store.canGenerate
@@ -294,6 +295,7 @@ import { useSiteBuilderStore } from './stores/siteBuilderStore'
 // Cloudflare Turnstile — site key is public (visible in page source by design)
 const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || '0x4AAAAAACp0MDK6rlOaKzf4'
 const turnstileRef = ref<HTMLElement | null>(null)
+const turnstileFailed = ref(false)
 import DevicePreview from './components/DevicePreview.vue'
 import PlacesAutocomplete from './components/PlacesAutocomplete.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
@@ -328,10 +330,19 @@ onMounted(() => {
     ;(window as any).onTurnstileSuccess = (token: string) => {
       store.turnstileToken = token
     }
+    ;(window as any).onTurnstileError = () => {
+      // If Turnstile fails to load (wrong domain, network issue), don't block the user
+      console.warn('[Turnstile] Verification failed — bypassing widget')
+      turnstileFailed.value = true
+    }
     const script = document.createElement('script')
     script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
     script.async = true
     script.defer = true
+    script.onerror = () => {
+      console.warn('[Turnstile] Script failed to load — bypassing widget')
+      turnstileFailed.value = true
+    }
     document.head.appendChild(script)
   }
 })
