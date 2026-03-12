@@ -141,10 +141,21 @@
               @select="store.templateName = $event"
             />
 
+            <!-- Cloudflare Turnstile (anti-abuse) -->
+            <div
+              v-if="turnstileSiteKey"
+              ref="turnstileRef"
+              class="cf-turnstile flex justify-center"
+              :data-sitekey="turnstileSiteKey"
+              data-callback="onTurnstileSuccess"
+              data-theme="dark"
+              data-size="flexible"
+            ></div>
+
             <!-- Generate Button -->
             <button
               @click="store.startGeneration()"
-              :disabled="!store.canGenerate"
+              :disabled="!store.canGenerate || (turnstileSiteKey && !store.turnstileToken)"
               class="w-full py-4 rounded-xl font-bold text-lg transition-all duration-200 flex items-center justify-center gap-3"
               :class="
                 !store.canGenerate
@@ -277,8 +288,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useSiteBuilderStore } from './stores/siteBuilderStore'
+
+// Cloudflare Turnstile — site key is public (visible in page source by design)
+const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || '0x4AAAAAACp0MDK6rlOaKzf4'
+const turnstileRef = ref<HTMLElement | null>(null)
 import DevicePreview from './components/DevicePreview.vue'
 import PlacesAutocomplete from './components/PlacesAutocomplete.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
@@ -307,6 +322,18 @@ onMounted(() => {
   store.initWebSocket()
   store.loadSiteHistory()
   store.loadTemplates()
+
+  // Load Cloudflare Turnstile script if configured
+  if (turnstileSiteKey) {
+    ;(window as any).onTurnstileSuccess = (token: string) => {
+      store.turnstileToken = token
+    }
+    const script = document.createElement('script')
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
+    script.async = true
+    script.defer = true
+    document.head.appendChild(script)
+  }
 })
 
 onUnmounted(() => {
