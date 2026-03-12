@@ -247,10 +247,14 @@ async def run_generation_pipeline(
         4. Build React site from templates
         5. Deploy to hosting (Cloudflare Pages / Vercel)
 
-    Progress is broadcast to all connected WebSocket clients at every step.
+    Progress is broadcast to subscribed WebSocket clients for this job.
     """
 
     try:
+        # Brief pause to let the client's WebSocket subscribe message arrive
+        # (the frontend sends subscribe immediately after receiving job_id)
+        await asyncio.sleep(0.5)
+
         is_website_only = not maps_url and website_url
         website_data: Optional[WebsiteData] = None
 
