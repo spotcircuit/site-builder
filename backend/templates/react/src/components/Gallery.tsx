@@ -40,7 +40,7 @@ export default function Gallery({ data }: { data: any }) {
                   src={photo}
                   alt={`${data.business_name || 'Business'} photo ${index + 1}`}
                   loading="lazy"
-                  className="w-full h-56 object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
+                  className="w-full aspect-[4/3] object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
                 />
               </div>
             </div>

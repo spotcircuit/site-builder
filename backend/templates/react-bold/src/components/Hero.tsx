@@ -21,18 +21,25 @@ export default function Hero({ data }: HeroProps) {
   const heroImage = firstPhoto || websiteHeroImage || aiHeroImage
   const video = parseVideoUrl(data.hero_video_url || '')
 
-  const backgroundStyle: React.CSSProperties = heroImage
-    ? {
-        background: `linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.8)), url(${heroImage})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-      }
-    : {
-        background: `linear-gradient(160deg, #111827 0%, ${data.color_primary || '#2563EB'} 100%)`,
-      }
+  const gradientFallback: React.CSSProperties = {
+    background: `linear-gradient(160deg, #111827 0%, ${data.color_primary || '#2563EB'} 100%)`,
+  }
 
   return (
-    <section id="hero" className="relative overflow-hidden" style={backgroundStyle}>
+    <section id="hero" className="relative overflow-hidden min-h-[500px] md:min-h-[600px]" style={!heroImage && !video.type ? gradientFallback : undefined}>
+      {/* ── Hero Background Image ── */}
+      {heroImage && !video.type && (
+        <>
+          <img
+            src={heroImage}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover object-center"
+            loading="eager"
+          />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/60 to-black/70" />
+        </>
+      )}
+
       {/* ── Video Background ── */}
       {video.type && (
         <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">

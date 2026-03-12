@@ -33,7 +33,7 @@ export default function Contact({ data }: { data: any }) {
             <img
               src={contactImage}
               alt="Visit us"
-              className="w-full h-64 object-cover"
+              className="w-full aspect-[3/2] object-cover rounded-lg"
             />
           </div>
         )}

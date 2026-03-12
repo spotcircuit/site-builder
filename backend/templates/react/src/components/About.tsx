@@ -29,7 +29,7 @@ export default function About({ data }: { data: any }) {
               <img
                 src={aboutImage}
                 alt={data.about_title || 'About us'}
-                className="w-full h-80 object-cover"
+                className="w-full aspect-[4/3] object-cover"
               />
             </div>
           )}

@@ -31,7 +31,7 @@ export default function WhyChooseUs({ data }: { data: any }) {
               <img
                 src={sectionImage}
                 alt="Why choose us"
-                className="w-full h-96 object-cover"
+                className="w-full aspect-[16/10] object-cover"
               />
             </div>
           )}

@@ -61,7 +61,7 @@ export default function Services({ data }: { data: any }) {
                 <img
                   src={sectionImage}
                   alt="Our services"
-                  className="w-full h-auto object-cover"
+                  className="w-full aspect-[16/9] object-cover"
                 />
               </div>
             </div>
