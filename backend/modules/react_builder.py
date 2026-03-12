@@ -307,7 +307,10 @@ async def _run_command(cmd: list[str], cwd: Path, timeout: int = 180) -> str:
     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
 
     if proc.returncode != 0:
-        error_msg = stderr.decode("utf-8", errors="replace")
+        stderr_text = stderr.decode("utf-8", errors="replace").strip()
+        stdout_text = stdout.decode("utf-8", errors="replace").strip()
+        # Vite/esbuild often prints errors to stdout, not stderr
+        error_msg = stderr_text or stdout_text or "(no output)"
         raise RuntimeError(
             f"Command {' '.join(cmd)} failed (exit {proc.returncode}): {error_msg}"
         )
