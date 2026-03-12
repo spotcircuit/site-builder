@@ -10,6 +10,7 @@ components. The only file that changes per generation is src/data.json
 """
 
 import asyncio
+import copy
 import json
 import os
 import shutil
@@ -21,7 +22,60 @@ from pydantic import BaseModel
 
 ProgressCallback = Optional[Callable[[str], Coroutine[Any, Any, None]]]
 
-TEMPLATE_DIR = Path(__file__).parent.parent / "templates" / "react"
+TEMPLATES_BASE = Path(__file__).parent.parent / "templates"
+
+# Available templates and their directory names
+TEMPLATE_REGISTRY = {
+    "modern": "react",           # Original template
+    "bold": "react-bold",        # Bold/dramatic layout
+    "elegant": "react-elegant",  # Clean/minimal layout
+}
+
+# Backwards compatibility: default template directory
+DEFAULT_TEMPLATE_DIR = TEMPLATES_BASE / "react"
+
+# Default section order for dynamic rendering
+DEFAULT_SECTIONS = [
+    {"id": "hero", "type": "hero", "enabled": True, "order": 0},
+    {"id": "social-proof", "type": "social-proof", "enabled": True, "order": 1},
+    {"id": "about", "type": "about", "enabled": True, "order": 2},
+    {"id": "services", "type": "services", "enabled": True, "order": 3},
+    {"id": "why-choose-us", "type": "why-choose-us", "enabled": True, "order": 4},
+    {"id": "how-it-works", "type": "how-it-works", "enabled": True, "order": 5},
+    {"id": "gallery", "type": "gallery", "enabled": True, "order": 6},
+    {"id": "testimonials", "type": "testimonials", "enabled": True, "order": 7},
+    {"id": "faq", "type": "faq", "enabled": True, "order": 8},
+    {"id": "cta", "type": "cta", "enabled": True, "order": 9},
+    {"id": "contact", "type": "contact", "enabled": True, "order": 10},
+    {"id": "footer", "type": "footer", "enabled": True, "order": 11},
+]
+
+
+def get_template_dir(template_name: str = "modern") -> Path:
+    """Resolve template name to directory path."""
+    dir_name = TEMPLATE_REGISTRY.get(template_name, TEMPLATE_REGISTRY["modern"])
+    template_dir = TEMPLATES_BASE / dir_name
+    if not template_dir.exists():
+        # Fallback to modern if requested template doesn't exist yet
+        template_dir = TEMPLATES_BASE / TEMPLATE_REGISTRY["modern"]
+    return template_dir
+
+
+def get_available_templates() -> list[dict]:
+    """Return list of available templates with metadata."""
+    templates = []
+    for name, dir_name in TEMPLATE_REGISTRY.items():
+        template_dir = TEMPLATES_BASE / dir_name
+        manifest_file = template_dir / "template.json"
+        if template_dir.exists():
+            meta = {"name": name, "dir": dir_name, "available": True}
+            if manifest_file.exists():
+                import json as _json
+                meta.update(_json.loads(manifest_file.read_text()))
+            templates.append(meta)
+        else:
+            templates.append({"name": name, "dir": dir_name, "available": False})
+    return templates
 
 
 def _inline_assets(dist_path: Path, index_html_path: Path) -> str:
@@ -197,6 +251,11 @@ def _generate_data_json(
         if website_data.get("social_links"):
             data["social_links"] = website_data["social_links"]
 
+    # Franchise/confidence metadata for editor
+    data["contact_confidence"] = business_data.get("contact_confidence", "high")
+    data["is_franchise"] = business_data.get("is_franchise", False)
+    data["all_locations"] = business_data.get("all_locations", [])
+
     # Use real Google reviews as testimonials if available (priority over AI-generated)
     # Only include 4-5 star reviews to present the business positively
     real_reviews = business_data.get("reviews") or []
@@ -230,6 +289,10 @@ def _generate_data_json(
         if generated_images.get("contact_image"):
             data["ai_contact_image"] = f"/images/{generated_images['contact_image']}"
 
+    # Section order for dynamic rendering (can be reordered/toggled in editor)
+    if "sections" not in data:
+        data["sections"] = copy.deepcopy(DEFAULT_SECTIONS)
+
     return data
 
 
@@ -256,6 +319,7 @@ async def build_react_site(
     content: dict,
     business_data: dict,
     job_id: str,
+    template_name: str = "modern",
     callback: ProgressCallback = None,
     generated_images: Optional[dict] = None,
 ) -> ReactBuildResult:
@@ -293,7 +357,8 @@ async def build_react_site(
             """Skip node_modules and dist when copying template."""
             return [c for c in contents if c in ("node_modules", "dist")]
 
-        shutil.copytree(TEMPLATE_DIR, build_dir, ignore=_ignore_build_artifacts)
+        template_dir = get_template_dir(template_name)
+        shutil.copytree(template_dir, build_dir, ignore=_ignore_build_artifacts)
 
         # Step 2: Generate data.json
         if callback:
@@ -329,7 +394,7 @@ async def build_react_site(
         if callback:
             await callback("Installing dependencies...")
 
-        template_node_modules = TEMPLATE_DIR / "node_modules"
+        template_node_modules = template_dir / "node_modules"
         node_modules_dst = build_dir / "node_modules"
 
         if template_node_modules.exists():
@@ -381,6 +446,7 @@ async def build_react_site(
 async def rebuild_react_site(
     data: dict,
     build_dir: str,
+    template_name: str = "modern",
     callback: ProgressCallback = None,
 ) -> ReactBuildResult:
     """Re-build an existing React site with updated data.json.
@@ -418,8 +484,9 @@ async def rebuild_react_site(
         await callback("Applying design changes...")
 
     # Re-copy template config files first so placeholders are fresh
+    template_dir = get_template_dir(template_name)
     for fname in ("index.html", "tailwind.config.js"):
-        template_file = TEMPLATE_DIR / fname
+        template_file = template_dir / fname
         if template_file.exists():
             shutil.copy2(template_file, build_path / fname)
 

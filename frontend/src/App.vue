@@ -12,7 +12,7 @@
           </div>
           <div>
             <h1 class="text-lg font-bold tracking-tight">Site Builder</h1>
-            <p class="text-xs text-gray-500 -mt-0.5">Maps to Website in 60 seconds</p>
+            <p class="text-xs text-gray-500 -mt-0.5">URL to Website in 60 seconds</p>
           </div>
         </div>
         <div class="flex items-center gap-4">
@@ -39,38 +39,86 @@
             AI-Powered Site Generation
           </div>
           <h2 class="text-4xl md:text-5xl font-bold text-white mb-3 tracking-tight">
-            Search Any Business,<br>
+            Any Business, Any URL,<br>
             <span class="bg-gradient-to-r from-cyan-400 to-emerald-400 bg-clip-text text-transparent">Get a Premium Website</span>
           </h2>
           <p class="text-gray-400 text-lg max-w-2xl mx-auto">
-            Find any business by name and generate a beautiful, client-ready React website with AI-generated content and images. Deploy instantly.
+            Paste a Google Maps link or any website URL and generate a beautiful, client-ready React website with AI-generated content and images. Deploy instantly.
           </p>
         </div>
 
         <!-- Input Card -->
         <div class="max-w-3xl mx-auto">
           <div class="bg-gray-800/50 rounded-2xl border border-gray-700/50 p-6 space-y-5">
-            <!-- Business Search (Places Autocomplete) -->
+            <!-- Business Search (Places Autocomplete + Any URL) -->
             <PlacesAutocomplete
               :disabled="store.isGenerating"
               @select="onPlaceSelect"
+              @website-url="onWebsiteUrl"
               @clear="onPlaceClear"
             />
 
-            <!-- Website URL Override (optional) -->
-            <div>
-              <label class="block text-sm font-medium text-gray-300 mb-2">
-                Business Website URL
-                <span class="text-gray-500 font-normal">(optional — we'll scrape real images & branding)</span>
-              </label>
-              <input
-                v-model="store.websiteUrl"
-                type="url"
-                placeholder="https://example.com"
-                class="w-full px-4 py-3 rounded-xl bg-gray-900/50 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
-                :disabled="store.isGenerating"
-              />
-            </div>
+            <!-- Business Name & Category (shown for website-only URLs) -->
+            <transition name="slide-fade">
+              <div v-if="store.inputUrlType === 'website'" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">
+                      What's the business called?
+                    </label>
+                    <input
+                      v-model="store.businessNameInput"
+                      type="text"
+                      placeholder="e.g. Joe's Pizza"
+                      class="w-full px-4 py-3 rounded-xl bg-gray-900/50 border text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
+                      :class="store.businessNameInput.trim() ? 'border-gray-600' : 'border-cyan-500/40'"
+                      :disabled="store.isGenerating"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">
+                      Category
+                      <span class="text-gray-500 font-normal">(optional)</span>
+                    </label>
+                    <input
+                      v-model="store.businessCategoryInput"
+                      type="text"
+                      placeholder="e.g. Italian Restaurant"
+                      class="w-full px-4 py-3 rounded-xl bg-gray-900/50 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
+                      :disabled="store.isGenerating"
+                    />
+                  </div>
+                </div>
+                <!-- Cross-pollination hint -->
+                <div class="flex items-start gap-2 px-3 py-2 rounded-lg bg-gray-800/50 border border-gray-700/50">
+                  <svg class="w-3.5 h-3.5 text-cyan-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  </svg>
+                  <p class="text-xs text-gray-400">
+                    <span class="text-gray-300">Want richer results?</span>
+                    Paste a Google Maps link instead to pull in real photos, reviews, hours, and contact info.
+                  </p>
+                </div>
+              </div>
+            </transition>
+
+            <!-- Website URL Enhancement (only when Maps URL is used) -->
+            <transition name="slide-fade">
+              <div v-if="store.inputUrlType === 'maps'" class="space-y-2">
+                <label class="block text-sm font-medium text-gray-300">
+                  Add their website for even better results
+                  <span class="text-gray-500 font-normal">(optional)</span>
+                </label>
+                <input
+                  v-model="store.websiteUrl"
+                  type="url"
+                  placeholder="https://example.com"
+                  class="w-full px-4 py-3 rounded-xl bg-gray-900/50 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
+                  :disabled="store.isGenerating"
+                />
+                <p class="text-xs text-gray-500 pl-1">We'll pull their real branding, colors, and images</p>
+              </div>
+            </transition>
 
             <!-- Business Context (optional) -->
             <div>
@@ -87,29 +135,19 @@
               ></textarea>
             </div>
 
-            <div class="grid grid-cols-2 gap-4">
-              <!-- Template -->
-              <div>
-                <label class="block text-sm font-medium text-gray-300 mb-2">Template</label>
-                <select
-                  v-model="store.templateName"
-                  class="w-full px-4 py-3 rounded-xl bg-gray-900/50 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
-                  :disabled="store.isGenerating"
-                >
-                  <option value="modern">Modern (React)</option>
-                </select>
-              </div>
-
-              <!-- Deploy target is always auto-detect -->
-            </div>
+            <!-- Template Selection -->
+            <TemplateCards
+              :selected="store.templateName"
+              @select="store.templateName = $event"
+            />
 
             <!-- Generate Button -->
             <button
               @click="store.startGeneration()"
-              :disabled="!store.mapsUrl.trim() || store.isGenerating"
+              :disabled="!store.canGenerate"
               class="w-full py-4 rounded-xl font-bold text-lg transition-all duration-200 flex items-center justify-center gap-3"
               :class="
-                !store.mapsUrl.trim() || store.isGenerating
+                !store.canGenerate
                   ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
                   : 'bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white shadow-lg shadow-cyan-600/20 hover:shadow-cyan-500/30 cursor-pointer hover:scale-[1.01] active:scale-[0.99]'
               "
@@ -247,23 +285,48 @@ import ProgressPanel from './components/ProgressPanel.vue'
 import SiteHistory from './components/SiteHistory.vue'
 import SeoScorePanel from './components/SeoScorePanel.vue'
 import EditorPanel from './components/editor/EditorPanel.vue'
+import TemplateCards from './components/TemplateCards.vue'
 
 const store = useSiteBuilderStore()
 
 function onPlaceSelect(place: { name: string; address: string; placeId: string | null; mapsUrl: string }) {
-  store.mapsUrl = place.mapsUrl
+  store.setInputUrl(place.mapsUrl)
+}
+
+function onWebsiteUrl(url: string) {
+  store.setInputUrl(url)
 }
 
 function onPlaceClear() {
-  store.mapsUrl = ''
+  store.setInputUrl('')
+  store.businessNameInput = ''
+  store.businessCategoryInput = ''
 }
 
 onMounted(() => {
   store.initWebSocket()
   store.loadSiteHistory()
+  store.loadTemplates()
 })
 
 onUnmounted(() => {
   store.destroyWebSocket()
 })
 </script>
+
+<style scoped>
+.slide-fade-enter-active {
+  transition: all 0.3s ease-out;
+}
+.slide-fade-leave-active {
+  transition: all 0.2s ease-in;
+}
+.slide-fade-enter-from {
+  transform: translateY(-10px);
+  opacity: 0;
+}
+.slide-fade-leave-to {
+  transform: translateY(-10px);
+  opacity: 0;
+}
+</style>

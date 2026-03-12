@@ -1,24 +1,31 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:9405'
 
-export async function generateSite(
-  mapsUrl: string,
-  templateName: string = 'modern',
-  deployTarget?: string,
-  businessContext?: string,
-  websiteUrl?: string,
-) {
+export async function generateSite(opts: {
+  mapsUrl?: string
+  websiteUrl?: string
+  businessName?: string
+  businessCategory?: string
+  templateName?: string
+  deployTarget?: string
+  businessContext?: string
+}) {
   const res = await fetch(`${API_BASE}/api/generate-site`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      maps_url: mapsUrl,
-      template_name: templateName,
-      deploy_target: deployTarget || null,
-      business_context: businessContext || null,
-      website_url: websiteUrl || null,
+      maps_url: opts.mapsUrl || null,
+      template_name: opts.templateName || 'modern',
+      deploy_target: opts.deployTarget || null,
+      business_context: opts.businessContext || null,
+      website_url: opts.websiteUrl || null,
+      business_name: opts.businessName || null,
+      business_category: opts.businessCategory || null,
     })
   })
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+    throw new Error(err.detail || `API error: ${res.status}`)
+  }
   return res.json()
 }
 
@@ -103,6 +110,25 @@ export async function generateSection(
   }
   return res.json()
 }
+
+// ─── Templates ────────────────────────────────────────
+
+export interface TemplateInfo {
+  name: string
+  label?: string
+  description?: string
+  preview_class?: string
+  available: boolean
+}
+
+export async function getTemplates(): Promise<TemplateInfo[]> {
+  const res = await fetch(`${API_BASE}/api/templates`)
+  if (!res.ok) return [{ name: 'modern', label: 'Modern', available: true }]
+  const data = await res.json()
+  return data.templates || []
+}
+
+// ─── Deploy ───────────────────────────────────────────
 
 export async function redeploySite(jobId: string) {
   const res = await fetch(`${API_BASE}/api/redeploy-site`, {

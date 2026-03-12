@@ -58,7 +58,7 @@ test.describe('Site Builder - API Endpoints', () => {
     const resp = await request.post(`${BACKEND}/api/generate-site`, {
       data: {},
     })
-    expect(resp.status()).toBe(422)
+    expect(resp.status()).toBe(400) // Custom validation: at least one URL required
   })
 
   test('GET /api/job/{id} returns 404 for missing job', async ({ request }) => {
@@ -155,6 +155,19 @@ test.describe('Site Builder - API Endpoints', () => {
   test('DELETE /api/site rejects invalid project names', async ({ request }) => {
     const resp = await request.delete(`${BACKEND}/api/site/invalid name!!`)
     expect(resp.status()).toBe(400)
+  })
+
+  test('GET /api/templates returns available templates', async ({ request }) => {
+    const resp = await request.get(`${BACKEND}/api/templates`)
+    expect(resp.ok()).toBeTruthy()
+    const data = await resp.json()
+    expect(data.templates).toBeTruthy()
+    expect(Array.isArray(data.templates)).toBeTruthy()
+    // At least modern should be available
+    const modern = data.templates.find((t: any) => t.name === 'modern')
+    expect(modern).toBeTruthy()
+    expect(modern.available).toBe(true)
+    expect(modern.label).toBeTruthy()
   })
 })
 

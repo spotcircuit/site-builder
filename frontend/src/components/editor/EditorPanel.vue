@@ -14,6 +14,29 @@
           v-if="store.editorDirty"
           class="px-1.5 py-0.5 rounded bg-amber-600/20 border border-amber-500/30 text-amber-300 text-[10px] font-medium"
         >Unsaved</span>
+        <!-- Undo/Redo -->
+        <div class="flex items-center gap-0.5 ml-1">
+          <button
+            @click="store.undo()"
+            :disabled="!store.canUndo"
+            class="p-1 rounded text-gray-400 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+            title="Undo (Ctrl+Z)"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4" />
+            </svg>
+          </button>
+          <button
+            @click="store.redo()"
+            :disabled="!store.canRedo"
+            class="p-1 rounded text-gray-400 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+            title="Redo (Ctrl+Shift+Z)"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10H11a5 5 0 00-5 5v2M21 10l-4-4M21 10l-4 4" />
+            </svg>
+          </button>
+        </div>
       </div>
       <button
         @click="store.closeEditor()"
@@ -48,19 +71,27 @@
 
     <!-- Scrollable section editors -->
     <div v-else class="flex-1 overflow-y-auto px-3 py-4 space-y-2.5 scrollbar-thin">
-      <EditorSectionHero />
-      <EditorSectionAbout />
-      <EditorSectionServices @generate="openGenerate" />
-      <EditorSectionGallery />
-      <EditorSectionCTA />
-      <EditorSectionFAQ @generate="openGenerate" />
-      <EditorSectionTestimonials @generate="openGenerate" />
-      <EditorSectionWhyChooseUs @generate="openGenerate" />
-      <EditorSectionHowItWorks @generate="openGenerate" />
-      <EditorSectionContact />
+      <!-- Section Order Manager (replaces Visibility) -->
+      <EditorSectionOrder />
+
+      <!-- Section editors rendered in section order -->
+      <template v-for="section in enabledSections" :key="section.id">
+        <EditorSectionHero v-if="section.type === 'hero'" />
+        <EditorSectionAbout v-if="section.type === 'about'" />
+        <EditorSectionServices v-if="section.type === 'services'" @generate="openGenerate" />
+        <EditorSectionGallery v-if="section.type === 'gallery'" />
+        <EditorSectionCTA v-if="section.type === 'cta'" />
+        <EditorSectionFAQ v-if="section.type === 'faq'" @generate="openGenerate" />
+        <EditorSectionTestimonials v-if="section.type === 'testimonials'" @generate="openGenerate" />
+        <EditorSectionWhyChooseUs v-if="section.type === 'why-choose-us'" @generate="openGenerate" />
+        <EditorSectionHowItWorks v-if="section.type === 'how-it-works'" @generate="openGenerate" />
+        <EditorSectionContact v-if="section.type === 'contact'" />
+      </template>
+
+      <!-- Always show design, social + SEO editors -->
       <EditorSectionDesign />
+      <EditorSectionSocial />
       <EditorSectionSEO />
-      <EditorSectionVisibility />
     </div>
 
     <!-- Action buttons -->
@@ -166,7 +197,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSiteBuilderStore } from '../../stores/siteBuilderStore'
 import EditorSectionHero from './EditorSectionHero.vue'
 import EditorSectionAbout from './EditorSectionAbout.vue'
@@ -180,15 +211,37 @@ import EditorSectionHowItWorks from './EditorSectionHowItWorks.vue'
 import EditorSectionContact from './EditorSectionContact.vue'
 import EditorSectionDesign from './EditorSectionDesign.vue'
 import EditorSectionSEO from './EditorSectionSEO.vue'
-import EditorSectionVisibility from './EditorSectionVisibility.vue'
+import EditorSectionOrder from './EditorSectionOrder.vue'
+import EditorSectionSocial from './EditorSectionSocial.vue'
 import GenerateModal from './GenerateModal.vue'
 
 const store = useSiteBuilderStore()
 const generateModalOpen = ref(false)
 const generateSection = ref('services')
 
+const enabledSections = computed(() => {
+  if (!store.editableData?.sections) return []
+  return [...store.editableData.sections]
+    .filter((s: any) => s.enabled)
+    .sort((a: any, b: any) => a.order - b.order)
+})
+
 function openGenerate(sectionType: string) {
   generateSection.value = sectionType
   generateModalOpen.value = true
 }
+
+// Keyboard shortcuts for undo/redo
+function handleKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+    e.preventDefault()
+    store.undo()
+  } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
+    e.preventDefault()
+    store.redo()
+  }
+}
+
+onMounted(() => document.addEventListener('keydown', handleKeydown))
+onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
 </script>

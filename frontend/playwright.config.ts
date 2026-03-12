@@ -4,6 +4,8 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 30000,
   retries: 0,
+  // Use 1 worker for full-generation tests to avoid concurrent pipeline overload
+  workers: 1,
   use: {
     baseURL: 'http://localhost:5177',
     trace: 'on-first-retry',

@@ -14,7 +14,9 @@
     "test:all": "vitest run && npx playwright test"
   },
   "dependencies": {
+    "@tinymce/tinymce-vue": "^6.3.0",
     "pinia": "^2.2.0",
+    "tinymce": "^8.3.2",
     "vue": "^3.5.0"
   },
   "devDependencies": {

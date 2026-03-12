@@ -3,7 +3,9 @@ import { ref, reactive, computed } from 'vue'
 import {
   generateSite, getJobStatus, getDownloadUrl, deleteDeployedSite,
   getJobEditableData, rebuildSite, generateSection, redeploySite,
+  getTemplates,
 } from '../services/api'
+import type { TemplateInfo } from '../services/api'
 import { wsService } from '../services/websocket'
 
 export interface PipelineStep {
@@ -30,7 +32,7 @@ export interface GeneratedSite {
 }
 
 export const PIPELINE_STEPS: PipelineStep[] = [
-  { key: 'parsing_url', label: 'Parse Google Maps URL', icon: '🔗' },
+  { key: 'parsing_url', label: 'Analyze URL', icon: '🔗' },
   { key: 'scraping_profile', label: 'Scrape Business Profile', icon: '🔍' },
   { key: 'generating_content', label: 'Generate Website Content', icon: '✍️' },
   { key: 'generating_images', label: 'Generate AI Images', icon: '🖼️' },
@@ -43,13 +45,48 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
   const phase = ref<'input' | 'progress' | 'result' | 'error'>('input')
   const mapsUrl = ref('')
   const templateName = ref('modern')
+  const availableTemplates = ref<TemplateInfo[]>([{ name: 'modern', label: 'Modern', available: true }])
   const deployTarget = ref('auto')
   const businessContext = ref('')
   const websiteUrl = ref('')
+  const inputUrl = ref('')  // Universal URL input (maps or website)
+  const inputUrlType = ref<'none' | 'maps' | 'website'>('none')
+  const businessNameInput = ref('')  // Required for website-only mode
+  const businessCategoryInput = ref('')  // Optional category for website-only
   const isGenerating = ref(false)
   const wsConnected = ref(false)
   const currentMessage = ref('')
   const jobId = ref<string | null>(null)
+
+  // ─── URL Detection ───────────────────────────────────
+  function detectUrlType(url: string): 'none' | 'maps' | 'website' {
+    if (!url.trim()) return 'none'
+    if (/google\.[^/]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps/i.test(url)) return 'maps'
+    if (/^https?:\/\//i.test(url)) return 'website'
+    return 'none'
+  }
+
+  function setInputUrl(url: string) {
+    inputUrl.value = url
+    inputUrlType.value = detectUrlType(url)
+    if (inputUrlType.value === 'maps') {
+      mapsUrl.value = url
+      websiteUrl.value = ''
+    } else if (inputUrlType.value === 'website') {
+      mapsUrl.value = ''
+      websiteUrl.value = url
+    } else {
+      mapsUrl.value = ''
+      websiteUrl.value = ''
+    }
+  }
+
+  const canGenerate = computed(() => {
+    if (isGenerating.value) return false
+    if (inputUrlType.value === 'maps') return true
+    if (inputUrlType.value === 'website') return !!businessNameInput.value.trim()
+    return false
+  })
 
   // ─── Step Tracking ─────────────────────────────────────
   const completedSteps = reactive<Set<string>>(new Set())
@@ -201,7 +238,7 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
   }
 
   async function startGeneration() {
-    if (!mapsUrl.value.trim() || isGenerating.value) return
+    if (!canGenerate.value) return
 
     isGenerating.value = true
     phase.value = 'progress'
@@ -219,13 +256,15 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     currentMessage.value = 'Starting generation...'
 
     try {
-      const response = await generateSite(
-        mapsUrl.value.trim(),
-        templateName.value,
-        deployTarget.value,
-        businessContext.value.trim(),
-        websiteUrl.value.trim(),
-      )
+      const response = await generateSite({
+        mapsUrl: mapsUrl.value.trim() || undefined,
+        websiteUrl: websiteUrl.value.trim() || undefined,
+        businessName: businessNameInput.value.trim() || undefined,
+        businessCategory: businessCategoryInput.value.trim() || undefined,
+        templateName: templateName.value,
+        deployTarget: deployTarget.value,
+        businessContext: businessContext.value.trim() || undefined,
+      })
       jobId.value = response.job_id
       addLog('info', `Job created: ${response.job_id}`)
 
@@ -255,6 +294,10 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     mapsUrl.value = ''
     businessContext.value = ''
     websiteUrl.value = ''
+    inputUrl.value = ''
+    inputUrlType.value = 'none'
+    businessNameInput.value = ''
+    businessCategoryInput.value = ''
     completedSteps.clear()
     activeStep.value = null
     Object.keys(stepMessages).forEach(k => delete stepMessages[k])
@@ -269,6 +312,8 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     errorDetails.value = ''
     currentMessage.value = ''
     jobId.value = null
+    undoStack.value = []
+    redoStack.value = []
   }
 
   async function viewSite(site: GeneratedSite) {
@@ -342,6 +387,15 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     } catch { /* ignore */ }
   }
 
+  async function loadTemplates() {
+    try {
+      const templates = await getTemplates()
+      if (templates.length > 0) {
+        availableTemplates.value = templates
+      }
+    } catch { /* fallback to default */ }
+  }
+
   // ─── Editor State ─────────────────────────────────────
   const editorOpen = ref(false)
   const editableData = ref<Record<string, any> | null>(null)
@@ -357,6 +411,38 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
   const editorError = ref('')
   const iframeRef = ref<HTMLIFrameElement | null>(null)
 
+  // ─── Undo/Redo ─────────────────────────────────────
+  const undoStack = ref<string[]>([])
+  const redoStack = ref<string[]>([])
+  const MAX_UNDO = 50
+
+  const canUndo = computed(() => undoStack.value.length > 0)
+  const canRedo = computed(() => redoStack.value.length > 0)
+
+  function pushUndoState() {
+    if (!editableData.value) return
+    const snapshot = JSON.stringify(editableData.value)
+    undoStack.value.push(snapshot)
+    if (undoStack.value.length > MAX_UNDO) {
+      undoStack.value.shift()
+    }
+    redoStack.value = []
+  }
+
+  function undo() {
+    if (!canUndo.value || !editableData.value) return
+    redoStack.value.push(JSON.stringify(editableData.value))
+    const prev = undoStack.value.pop()!
+    editableData.value = JSON.parse(prev)
+  }
+
+  function redo() {
+    if (!canRedo.value || !editableData.value) return
+    undoStack.value.push(JSON.stringify(editableData.value))
+    const next = redoStack.value.pop()!
+    editableData.value = JSON.parse(next)
+  }
+
   function openEditor() {
     if (!jobId.value) return
     editorOpen.value = true
@@ -366,6 +452,8 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     getJobEditableData(jobId.value).then((res) => {
       editableData.value = res.data
       savedDataSnapshot.value = JSON.stringify(res.data)
+      undoStack.value = []
+      redoStack.value = []
     }).catch((err) => {
       console.error('[Editor] Failed to load editable data:', err)
       editorError.value = 'Failed to load site data for editing'
@@ -387,6 +475,7 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
 
   function updateEditableField(path: string, value: any) {
     if (!editableData.value) return
+    pushUndoState()
     // Support dot-notation paths like "services.0.name"
     const keys = path.split('.')
     let obj: any = editableData.value
@@ -402,6 +491,7 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
 
   function addEditableArrayItem(path: string, item: any) {
     if (!editableData.value) return
+    pushUndoState()
     const arr = editableData.value[path]
     if (Array.isArray(arr)) {
       arr.push(item)
@@ -410,6 +500,7 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
 
   function removeEditableArrayItem(path: string, index: number) {
     if (!editableData.value) return
+    pushUndoState()
     const arr = editableData.value[path]
     if (Array.isArray(arr)) {
       arr.splice(index, 1)
@@ -420,6 +511,7 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     if (!editableData.value) return
     const arr = editableData.value[path]
     if (!Array.isArray(arr)) return
+    pushUndoState()
     const to = direction === 'up' ? from - 1 : from + 1
     if (to < 0 || to >= arr.length) return
     const item = arr.splice(from, 1)[0]
@@ -510,7 +602,8 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
 
   return {
     // State
-    phase, mapsUrl, templateName, deployTarget, businessContext, websiteUrl, isGenerating,
+    phase, mapsUrl, templateName, availableTemplates, deployTarget, businessContext, websiteUrl, isGenerating,
+    inputUrl, inputUrlType, businessNameInput, businessCategoryInput, canGenerate,
     wsConnected, currentMessage, jobId,
     completedSteps, activeStep, stepMessages,
     logs, resultHtml, resultTitle, resultBusinessName,
@@ -521,15 +614,17 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     editorOpen, editableData, savedDataSnapshot, editorDirty, showUnsavedWarning,
     isRebuilding, isGeneratingSection, isRedeploying,
     editorError, iframeRef,
+    undoStack, redoStack, canUndo, canRedo,
     // Computed
     downloadUrl, previewWidth,
     // Actions
-    stepStatus, addLog, startGeneration, resetToInput,
-    viewSite, deleteSite, loadSiteHistory, saveSiteHistory,
+    stepStatus, addLog, startGeneration, resetToInput, setInputUrl, detectUrlType,
+    viewSite, deleteSite, loadSiteHistory, loadTemplates, saveSiteHistory,
     initWebSocket, destroyWebSocket,
     // Editor Actions
     openEditor, closeEditor, forceCloseEditor, updateEditableField,
     addEditableArrayItem, removeEditableArrayItem, moveEditableArrayItem,
     quickPreview, applyChanges, aiGenerateSection, redeployEditedSite,
+    undo, redo, pushUndoState,
   }
 })

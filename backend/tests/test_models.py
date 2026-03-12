@@ -33,9 +33,22 @@ class TestGenerateSiteRequest:
         assert req.business_context == "Best plumber in town"
         assert req.website_url == "https://example.com"
 
-    def test_missing_maps_url(self):
-        with pytest.raises(Exception):
-            GenerateSiteRequest()
+    def test_both_urls_optional(self):
+        """maps_url is now optional (website_url can be used instead)."""
+        req = GenerateSiteRequest()
+        assert req.maps_url is None
+        assert req.website_url is None
+
+    def test_website_only(self):
+        req = GenerateSiteRequest(
+            website_url="https://example.com",
+            business_name="Test Biz",
+            business_category="Restaurant",
+        )
+        assert req.maps_url is None
+        assert req.website_url == "https://example.com"
+        assert req.business_name == "Test Biz"
+        assert req.business_category == "Restaurant"
 
 
 # ─── GenerateSiteResponse ─────────────────────────────

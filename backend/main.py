@@ -16,6 +16,7 @@ import traceback
 import uuid
 from datetime import datetime
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from pathlib import Path as FilePath
@@ -29,7 +30,7 @@ from modules.maps_url_parser import parse_maps_url, ParsedMapsUrl
 from modules.maps_scraper import scrape_business_from_maps, BusinessData
 from modules.website_scraper import scrape_website, WebsiteData
 from modules.site_generator import generate_site, generate_site_content, GeneratedSite, SiteContent
-from modules.react_builder import build_react_site, rebuild_react_site, cleanup_build, ReactBuildResult
+from modules.react_builder import build_react_site, rebuild_react_site, cleanup_build, ReactBuildResult, get_available_templates
 from modules.vercel_deployer import deploy_to_vercel, is_vercel_configured
 from modules.cloudflare_deployer import deploy_to_cloudflare, is_cloudflare_configured
 from modules.image_generator import generate_site_images, is_gemini_configured
@@ -135,13 +136,22 @@ async def _cleanup_expired_jobs():
 # Request / Response models
 # ---------------------------------------------------------------------------
 class GenerateSiteRequest(BaseModel):
-    """Request body for the site generation endpoint."""
+    """Request body for the site generation endpoint.
 
-    maps_url: str
+    Accepts either a Google Maps URL or any website URL.
+    - maps_url: Google Maps link (triggers full Maps scraping pipeline)
+    - website_url: Any business website URL (scrapes website directly)
+    At least one of maps_url or website_url must be provided.
+    When using website_url without maps_url, business_name is required.
+    """
+
+    maps_url: Optional[str] = None
     template_name: str = "modern"
     deploy_target: Optional[str] = None  # "vercel", "cloudflare", "auto", or None
     business_context: Optional[str] = None  # User-provided business description
-    website_url: Optional[str] = None  # Override website URL for scraping
+    website_url: Optional[str] = None  # Business website URL for scraping
+    business_name: Optional[str] = None  # Required when using website_url without maps_url
+    business_category: Optional[str] = None  # Optional category hint for website-only generation
 
 
 class GenerateSiteResponse(BaseModel):
@@ -193,89 +203,173 @@ def _resolve_deploy_target(deploy_target: Optional[str]) -> Optional[str]:
 
 async def run_generation_pipeline(
     job_id: str,
-    maps_url: str,
+    maps_url: Optional[str],
     template_name: str,
     deploy_target: Optional[str] = None,
     business_context: Optional[str] = None,
     website_url: Optional[str] = None,
+    business_name: Optional[str] = None,
+    business_category: Optional[str] = None,
 ) -> None:
     """
     Execute the full site-generation pipeline for a given job.
 
+    Supports two modes:
+    - **Maps mode**: maps_url provided — full Google Maps scraping pipeline
+    - **Website mode**: website_url only — scrapes website directly, skips Maps
+
     Steps:
-        1. Parse the Google Maps URL into structured data.
-        2. Scrape business profile information from Google Maps.
-        3. Generate website content via Claude AI.
-        4. Build React site from templates.
-        5. Deploy to hosting (Cloudflare Pages / Vercel).
+        1. Parse URL / identify source
+        2. Scrape business profile (Maps or website)
+        3. Generate website content via Claude AI
+        4. Build React site from templates
+        5. Deploy to hosting (Cloudflare Pages / Vercel)
 
     Progress is broadcast to all connected WebSocket clients at every step.
     """
 
     try:
-        # ── Step 1: Parse Maps URL ──────────────────────────────────────
-        jobs[job_id]["status"] = "parsing_url"
-        jobs[job_id]["step"] = "parsing_url"
-        await ws_manager.broadcast_step(
-            step="parsing_url",
-            status="started",
-            message="Parsing Google Maps URL...",
-            data={"job_id": job_id, "maps_url": maps_url},
-        )
+        is_website_only = not maps_url and website_url
+        website_data: Optional[WebsiteData] = None
 
-        parsed_url: ParsedMapsUrl = await parse_maps_url(maps_url)
-
-        await ws_manager.broadcast_step(
-            step="parsing_url",
-            status="completed",
-            message=f"Parsed URL for: {parsed_url.business_name or 'Unknown business'}",
-            data={
-                "job_id": job_id,
-                "business_name": parsed_url.business_name,
-                "place_id": parsed_url.place_id,
-            },
-        )
-
-        # ── Step 2: Scrape business profile ─────────────────────────────
-        jobs[job_id]["status"] = "scraping_profile"
-        jobs[job_id]["step"] = "scraping_profile"
-        await ws_manager.broadcast_step(
-            step="scraping_profile",
-            status="started",
-            message="Scraping business profile from Google Maps...",
-            data={"job_id": job_id},
-        )
-
-        async def _scraper_callback(data: dict) -> None:
+        if is_website_only:
+            # ── WEBSITE-ONLY MODE ───────────────────────────────────────
+            # Skip Maps parsing/scraping, go straight to website scrape
+            jobs[job_id]["status"] = "scraping_website"
+            jobs[job_id]["step"] = "scraping_website"
             await ws_manager.broadcast_step(
-                step="scraping_profile",
-                status="progress",
-                message=data.get("message", ""),
-                data={"job_id": job_id, "sub_step": data.get("step", "")},
+                step="parsing_url",
+                status="started",
+                message=f"Analyzing website: {website_url}",
+                data={"job_id": job_id, "website_url": website_url},
+            )
+            await ws_manager.broadcast_step(
+                step="parsing_url",
+                status="completed",
+                message=f"Website URL detected: {business_name or 'Business'}",
+                data={"job_id": job_id},
             )
 
-        business_data: BusinessData = await scrape_business_from_maps(
-            place_id=parsed_url.place_id,
-            cid=parsed_url.cid,
-            business_name=parsed_url.business_name,
-            raw_url=parsed_url.raw_url,
-            callback=_scraper_callback,
-        )
+            # Scrape the website
+            await ws_manager.broadcast_step(
+                step="scraping_profile",
+                status="started",
+                message=f"Scraping website: {website_url}",
+                data={"job_id": job_id},
+            )
 
-        await ws_manager.broadcast_step(
-            step="scraping_profile",
-            status="completed",
-            message=f"Scraped profile for: {business_data.name}",
-            data={"job_id": job_id, "business_name": business_data.name},
-        )
+            try:
+                website_data = await scrape_website(website_url)
+            except Exception as ws_exc:
+                logger.warning("Website scrape failed: %s", ws_exc)
+                website_data = WebsiteData(url=website_url)
+
+            # Build a minimal BusinessData from website scrape + user input
+            scraped_name = (
+                website_data.title
+                or business_name
+                or urlparse(website_url).hostname
+                or "Business"
+            )
+            effective_name = business_name or scraped_name
+
+            business_data = BusinessData(
+                name=effective_name,
+                website=website_url,
+                category=business_category or None,
+                address=website_data.contact_info.get("address") if website_data else None,
+                phone=website_data.contact_info.get("phone") if website_data else None,
+                email=website_data.contact_info.get("email") if website_data else None,
+                hours=website_data.hours if website_data else None,
+                services=website_data.services if website_data and website_data.services else None,
+                photos=website_data.images[:10] if website_data and website_data.images else None,
+                description=website_data.about_text if website_data else None,
+            )
+
+            # Log franchise/confidence detection
+            if website_data and website_data.contact_confidence == "low":
+                await ws_manager.broadcast_step(
+                    step="scraping_profile",
+                    status="progress",
+                    message=f"Multiple locations detected ({len(website_data.all_locations)} addresses). Contact info may need verification.",
+                    data={"job_id": job_id},
+                )
+
+            await ws_manager.broadcast_step(
+                step="scraping_profile",
+                status="completed",
+                message=f"Scraped website for: {effective_name}",
+                data={"job_id": job_id, "business_name": effective_name},
+            )
+
+        else:
+            # ── MAPS MODE (original flow) ───────────────────────────────
+            # Step 1: Parse Maps URL
+            jobs[job_id]["status"] = "parsing_url"
+            jobs[job_id]["step"] = "parsing_url"
+            await ws_manager.broadcast_step(
+                step="parsing_url",
+                status="started",
+                message="Parsing Google Maps URL...",
+                data={"job_id": job_id, "maps_url": maps_url},
+            )
+
+            parsed_url: ParsedMapsUrl = await parse_maps_url(maps_url)
+
+            await ws_manager.broadcast_step(
+                step="parsing_url",
+                status="completed",
+                message=f"Parsed URL for: {parsed_url.business_name or 'Unknown business'}",
+                data={
+                    "job_id": job_id,
+                    "business_name": parsed_url.business_name,
+                    "place_id": parsed_url.place_id,
+                },
+            )
+
+            # Step 2: Scrape business profile from Maps
+            jobs[job_id]["status"] = "scraping_profile"
+            jobs[job_id]["step"] = "scraping_profile"
+            await ws_manager.broadcast_step(
+                step="scraping_profile",
+                status="started",
+                message="Scraping business profile from Google Maps...",
+                data={"job_id": job_id},
+            )
+
+            async def _scraper_callback(data: dict) -> None:
+                await ws_manager.broadcast_step(
+                    step="scraping_profile",
+                    status="progress",
+                    message=data.get("message", ""),
+                    data={"job_id": job_id, "sub_step": data.get("step", "")},
+                )
+
+            business_data: BusinessData = await scrape_business_from_maps(
+                place_id=parsed_url.place_id,
+                cid=parsed_url.cid,
+                business_name=parsed_url.business_name,
+                raw_url=parsed_url.raw_url,
+                callback=_scraper_callback,
+            )
+
+            await ws_manager.broadcast_step(
+                step="scraping_profile",
+                status="completed",
+                message=f"Scraped profile for: {business_data.name}",
+                data={"job_id": job_id, "business_name": business_data.name},
+            )
 
         # ── Step 2.5: Scrape the business website for branding ──────────
-        # Use user-provided website URL if given, otherwise fall back to Maps data
-        effective_website = website_url or business_data.website
-        if website_url and not business_data.website:
-            business_data.website = website_url  # Store for downstream use
+        # (Skip if we already scraped in website-only mode)
+        if not is_website_only:
+            # Use user-provided website URL if given, otherwise fall back to Maps data
+            effective_website = website_url or business_data.website
+            if website_url and not business_data.website:
+                business_data.website = website_url  # Store for downstream use
+        else:
+            effective_website = None  # Already scraped above
 
-        website_data: Optional[WebsiteData] = None
         if effective_website:
             try:
                 await ws_manager.broadcast_step(
@@ -291,7 +385,8 @@ async def run_generation_pipeline(
                     message=(
                         f"Got {len(website_data.images)} images, "
                         f"{len(website_data.brand_colors)} colors, "
-                        f"{len(website_data.social_links)} social links from website"
+                        f"{len(website_data.social_links)} social links, "
+                        f"{len(website_data.subpages_scraped)} subpages from website"
                     ),
                     data={"job_id": job_id},
                 )
@@ -325,7 +420,30 @@ async def run_generation_pipeline(
         biz_dict = business_data.model_dump()
         # Merge website scrape data so the AI can use branding, about text, etc.
         if website_data:
+            # Backfill Maps data gaps from website scrape
+            if not business_data.phone and website_data.contact_info.get("phone"):
+                business_data.phone = website_data.contact_info["phone"]
+            if not business_data.email and website_data.contact_info.get("email"):
+                business_data.email = website_data.contact_info["email"]
+            if not business_data.hours and website_data.hours:
+                business_data.hours = website_data.hours
+            if not business_data.address and website_data.contact_info.get("address"):
+                business_data.address = website_data.contact_info["address"]
+            # Re-dump after backfill so biz_dict has the updated values
+            biz_dict = business_data.model_dump()
             biz_dict["website_data"] = website_data.model_dump()
+            # Thread franchise/confidence metadata
+            biz_dict["contact_confidence"] = website_data.contact_confidence
+            biz_dict["is_franchise"] = website_data.is_franchise
+            biz_dict["all_locations"] = website_data.all_locations
+        if not website_data:
+            biz_dict["contact_confidence"] = "high"  # Maps-only = always high confidence
+            biz_dict["is_franchise"] = False
+            biz_dict["all_locations"] = []
+        # Maps data is location-specific — always high confidence
+        if not is_website_only:
+            biz_dict["contact_confidence"] = "high"
+            biz_dict["is_franchise"] = False
         # Add user-provided business context
         if business_context:
             biz_dict["user_context"] = business_context
@@ -415,6 +533,7 @@ async def run_generation_pipeline(
             content=content.model_dump(),
             business_data=biz_dict,
             job_id=job_id,
+            template_name=template_name,
             callback=_build_callback,
             generated_images=generated_images.model_dump() if generated_images else None,
         )
@@ -587,19 +706,34 @@ async def generate_site_endpoint(request: GenerateSiteRequest):
     """
     Start an asynchronous site generation job.
 
-    Parses the provided Google Maps URL, scrapes business data, generates
-    content with Claude, and renders HTML.  Progress is streamed over the
-    ``/ws`` WebSocket endpoint.
+    Accepts either a Google Maps URL or any website URL.
+    Scrapes business data, generates content with Claude, and renders HTML.
+    Progress is streamed over the ``/ws`` WebSocket endpoint.
 
     Returns immediately with a ``job_id`` that can be polled via
     ``GET /api/job/{job_id}``.
     """
+    # Validate: at least one URL must be provided
+    if not request.maps_url and not request.website_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Either maps_url or website_url must be provided",
+        )
+
+    # For website-only mode, business_name is required
+    if not request.maps_url and request.website_url and not request.business_name:
+        raise HTTPException(
+            status_code=400,
+            detail="business_name is required when using website_url without maps_url",
+        )
+
     job_id = str(uuid.uuid4())
 
     jobs[job_id] = {
         "job_id": job_id,
         "status": "started",
         "maps_url": request.maps_url,
+        "website_url": request.website_url,
         "template_name": request.template_name,
         "created_at": datetime.now().isoformat(),
         "step": None,
@@ -615,6 +749,8 @@ async def generate_site_endpoint(request: GenerateSiteRequest):
             deploy_target=request.deploy_target,
             business_context=request.business_context,
             website_url=request.website_url,
+            business_name=request.business_name,
+            business_category=request.business_category,
         )
     )
 
@@ -753,6 +889,7 @@ async def rebuild_site_endpoint(request: RebuildSiteRequest):
         build_result = await rebuild_react_site(
             data=request.data,
             build_dir=build_dir,
+            template_name=job.get("template_name", "modern"),
         )
 
         # Update stored result
@@ -1043,6 +1180,16 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as exc:
         print(f"[WS] Connection error: {exc}")
         ws_manager.disconnect(websocket)
+
+
+# ---------------------------------------------------------------------------
+# Template Registry
+# ---------------------------------------------------------------------------
+
+@app.get("/api/templates")
+async def list_templates():
+    """Return available site templates with metadata."""
+    return {"templates": get_available_templates()}
 
 
 # ---------------------------------------------------------------------------

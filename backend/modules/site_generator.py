@@ -377,11 +377,30 @@ def _build_content_prompt(business_data: dict) -> str:
         if isinstance(photos, list):
             parts.append(f"Photos Available: {len(photos)}")
 
+    # Franchise/multi-location awareness
+    confidence = business_data.get("contact_confidence", "high")
+    if confidence == "low":
+        parts.append("\n=== IMPORTANT: MULTI-LOCATION BUSINESS ===")
+        parts.append("This appears to be a franchise or multi-location business.")
+        parts.append("Do NOT reference a specific address or phone number in the generated copy.")
+        parts.append("Use generic phrasing like 'Visit us' or 'Get in touch' instead of")
+        parts.append("mentioning a specific street address that may not be the user's location.")
+        all_locs = business_data.get("all_locations", [])
+        if all_locs:
+            parts.append(f"Locations found ({len(all_locs)}): {', '.join(all_locs[:5])}")
+        parts.append("=== END MULTI-LOCATION NOTE ===\n")
+    elif confidence == "none":
+        parts.append("\n=== NOTE: NO CONTACT INFO FOUND ===")
+        parts.append("No address or phone number was found on the website.")
+        parts.append("Use placeholder-friendly phrasing like 'Contact us' without specific details.")
+        parts.append("=== END NOTE ===\n")
+
     # Any extra fields we haven't explicitly handled
     handled_keys = {
         "name", "category", "type", "description", "address", "phone",
         "email", "website", "hours", "services", "reviews", "rating",
-        "review_count", "photos",
+        "review_count", "photos", "contact_confidence", "is_franchise",
+        "all_locations",
     }
     extra = {k: v for k, v in business_data.items() if k not in handled_keys and v}
     if extra:

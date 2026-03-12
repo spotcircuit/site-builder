@@ -28,6 +28,7 @@ class BusinessData(BaseModel):
     name: str
     address: Optional[str] = None
     phone: Optional[str] = None
+    email: Optional[str] = None
     website: Optional[str] = None
     rating: Optional[float] = None
     review_count: Optional[int] = None

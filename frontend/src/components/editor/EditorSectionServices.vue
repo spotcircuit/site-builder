@@ -39,13 +39,11 @@
           class="w-full px-2 py-1.5 rounded bg-gray-700 border border-gray-600 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500"
           placeholder="Service name"
         />
-        <textarea
-          :value="svc.description || ''"
-          @input="store.updateEditableField(`services.${i}.description`, ($event.target as HTMLTextAreaElement).value)"
-          rows="2"
-          class="w-full px-2 py-1.5 rounded bg-gray-700 border border-gray-600 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
-          placeholder="Description..."
-        ></textarea>
+        <RichTextField
+          :modelValue="svc.description || ''"
+          @update:modelValue="store.updateEditableField(`services.${i}.description`, $event)"
+          :rows="3"
+        />
       </div>
 
       <ImageField
@@ -73,6 +71,7 @@ import { computed } from 'vue'
 import { useSiteBuilderStore } from '../../stores/siteBuilderStore'
 import EditorAccordion from './EditorAccordion.vue'
 import ImageField from './ImageField.vue'
+import RichTextField from './RichTextField.vue'
 
 defineEmits<{ generate: [sectionType: string] }>()
 const store = useSiteBuilderStore()

@@ -1,3 +1,12 @@
+function parseVideoUrl(url: string): { type: 'youtube' | 'vimeo' | null; id: string } {
+  if (!url) return { type: null, id: '' }
+  const ytMatch = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/)
+  if (ytMatch) return { type: 'youtube', id: ytMatch[1] }
+  const vimeoMatch = url.match(/vimeo\.com\/(\d+)/)
+  if (vimeoMatch) return { type: 'vimeo', id: vimeoMatch[1] }
+  return { type: null, id: '' }
+}
+
 interface HeroProps {
   data: any
 }
@@ -10,6 +19,7 @@ export default function Hero({ data }: HeroProps) {
 
   // Priority: Google Maps photo > website hero image > AI-generated image > gradient fallback
   const heroImage = firstPhoto || websiteHeroImage || aiHeroImage
+  const video = parseVideoUrl(data.hero_video_url || '')
 
   const backgroundStyle: React.CSSProperties = heroImage
     ? {
@@ -23,8 +33,25 @@ export default function Hero({ data }: HeroProps) {
 
   return (
     <section id="hero" className="relative overflow-hidden" style={backgroundStyle}>
+      {/* ── Video Background ── */}
+      {video.type && (
+        <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+          <iframe
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+            style={{ width: '177.78vh', minWidth: '100%', minHeight: '100%', border: 'none' }}
+            src={video.type === 'youtube'
+              ? `https://www.youtube-nocookie.com/embed/${video.id}?autoplay=1&mute=1&loop=1&playlist=${video.id}&controls=0&showinfo=0&rel=0&modestbranding=1&playsinline=1`
+              : `https://player.vimeo.com/video/${video.id}?autoplay=1&muted=1&loop=1&background=1`}
+            allow="autoplay; fullscreen"
+            loading="lazy"
+            title="Hero background video"
+          />
+          <div className="absolute inset-0 bg-black/50" />
+        </div>
+      )}
+
       {/* ── Decorative Circles ── */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+      <div className="absolute inset-0 overflow-hidden pointer-events-none z-[1]" aria-hidden="true">
         <div
           className="absolute -top-20 -left-20 w-80 h-80 rounded-full opacity-[0.07]"
           style={{ background: data.color_secondary || '#F59E0B' }}

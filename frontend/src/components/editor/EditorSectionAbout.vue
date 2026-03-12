@@ -9,15 +9,12 @@
           class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-600 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500"
         />
       </div>
-      <div>
-        <label class="block text-xs font-medium text-gray-400 mb-1">About Text</label>
-        <textarea
-          :value="store.editableData?.about_text || ''"
-          @input="store.updateEditableField('about_text', ($event.target as HTMLTextAreaElement).value)"
-          rows="5"
-          class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-600 text-white text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
-        ></textarea>
-      </div>
+      <RichTextField
+        label="About Text"
+        :modelValue="store.editableData?.about_text || ''"
+        @update:modelValue="store.updateEditableField('about_text', $event)"
+        :rows="5"
+      />
       <ImageField
         label="About Section Image"
         :modelValue="store.editableData?.ai_about_image || ''"
@@ -31,5 +28,6 @@
 import { useSiteBuilderStore } from '../../stores/siteBuilderStore'
 import EditorAccordion from './EditorAccordion.vue'
 import ImageField from './ImageField.vue'
+import RichTextField from './RichTextField.vue'
 const store = useSiteBuilderStore()
 </script>
