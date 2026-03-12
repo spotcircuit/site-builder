@@ -119,6 +119,21 @@ def _inline_assets(dist_path: Path, index_html_path: Path) -> str:
         html,
     )
 
+    # Inline AI-generated images as base64 data URIs so they work in srcdoc preview
+    import mimetypes
+
+    images_dir = dist_path / "images"
+    if images_dir.exists():
+        import base64
+
+        for img_file in images_dir.iterdir():
+            if img_file.is_file() and img_file.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".svg"):
+                mime = mimetypes.guess_type(img_file.name)[0] or "image/png"
+                b64 = base64.b64encode(img_file.read_bytes()).decode("ascii")
+                data_uri = f"data:{mime};base64,{b64}"
+                # Replace the path reference in the inlined JS
+                html = html.replace(f"/images/{img_file.name}", data_uri)
+
     return html
 
 
