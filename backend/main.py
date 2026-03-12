@@ -90,6 +90,28 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 # ---------------------------------------------------------------------------
 jobs: dict[str, dict[str, Any]] = {}
 
+# ---------------------------------------------------------------------------
+# Persistent error log
+# ---------------------------------------------------------------------------
+ERROR_LOG_PATH = FilePath(__file__).parent / "error_log.jsonl"
+
+
+def _log_error(job_id: str, error_message: str, error_details: str, context: dict | None = None) -> None:
+    """Append an error entry to the persistent JSONL error log."""
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "job_id": job_id,
+        "error": error_message,
+        "traceback": error_details,
+    }
+    if context:
+        entry["context"] = context
+    try:
+        with open(ERROR_LOG_PATH, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as log_exc:
+        logger.warning("Failed to write error log: %s", log_exc)
+
 # Job TTL: auto-delete undeployed jobs after 3 days
 JOB_TTL_SECONDS = 3 * 24 * 60 * 60  # 3 days
 
@@ -682,10 +704,20 @@ async def run_generation_pipeline(
     except Exception as exc:
         error_message = str(exc)
         error_details = traceback.format_exc()
-        print(f"[Pipeline] Error in job {job_id}: {error_message}\n{error_details}")
+        logger.error("[Pipeline] Error in job %s: %s\n%s", job_id, error_message, error_details)
+
+        # Persist to error log
+        _log_error(job_id, error_message, error_details, context={
+            "maps_url": maps_url,
+            "website_url": website_url,
+            "business_name": business_name,
+            "template": template_name,
+            "step": jobs[job_id].get("status", "unknown"),
+        })
 
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = error_message
+        jobs[job_id]["error_details"] = error_details
         jobs[job_id]["failed_at"] = datetime.now().isoformat()
 
         await ws_manager.broadcast_error(
@@ -902,6 +934,7 @@ async def rebuild_site_endpoint(request: RebuildSiteRequest):
         return {"html": build_result.index_html, "status": "rebuilt"}
 
     except Exception as exc:
+        _log_error(request.job_id, f"Rebuild failed: {exc}", traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Rebuild failed: {exc}")
 
 
@@ -1007,6 +1040,7 @@ async def generate_section_endpoint(request: GenerateSectionRequest):
         return {"items": items, "section_type": request.section_type}
 
     except Exception as exc:
+        _log_error("generate-section", f"AI generation failed: {exc}", traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"AI generation failed: {exc}")
 
 
@@ -1078,6 +1112,7 @@ async def redeploy_site_endpoint(request: RedeploySiteRequest):
     except HTTPException:
         raise
     except Exception as exc:
+        _log_error(request.job_id, f"Deploy failed: {exc}", traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Deploy failed: {exc}")
 
 
@@ -1122,6 +1157,35 @@ async def health_check():
             "gemini": is_gemini_configured(),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Error Log
+# ---------------------------------------------------------------------------
+@app.get("/api/errors")
+async def get_errors(limit: int = 50):
+    """Return recent errors from the persistent error log (newest first)."""
+    if not ERROR_LOG_PATH.exists():
+        return {"errors": [], "total": 0}
+    try:
+        lines = ERROR_LOG_PATH.read_text().strip().splitlines()
+        entries = []
+        for line in reversed(lines[-limit:]):
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return {"errors": entries, "total": len(lines)}
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to read error log: {exc}")
+
+
+@app.delete("/api/errors")
+async def clear_errors():
+    """Clear the error log."""
+    if ERROR_LOG_PATH.exists():
+        ERROR_LOG_PATH.unlink()
+    return {"status": "cleared"}
 
 
 # ---------------------------------------------------------------------------
