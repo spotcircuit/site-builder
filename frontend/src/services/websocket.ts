@@ -58,6 +58,22 @@ class WebSocketService {
     }
   }
 
+  /** Subscribe to updates for a specific job_id (scoped messaging) */
+  subscribe(jobId: string) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'subscribe', job_id: jobId }))
+    } else {
+      // Queue the subscribe for when connection opens
+      const origOnOpen = this.ws?.onopen
+      if (this.ws) {
+        this.ws.onopen = (ev) => {
+          if (origOnOpen) (origOnOpen as any).call(this.ws, ev)
+          this.ws?.send(JSON.stringify({ type: 'subscribe', job_id: jobId }))
+        }
+      }
+    }
+  }
+
   disconnect() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.ws?.close()

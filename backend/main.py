@@ -723,6 +723,7 @@ async def run_generation_pipeline(
         await ws_manager.broadcast_error(
             error_message=f"Site generation failed: {error_message}",
             details={"job_id": job_id, "traceback": error_details},
+            job_id=job_id,
         )
 
 
@@ -1235,7 +1236,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     message = json.loads(data)
                     if isinstance(message, dict):
                         msg_type = message.get("type", "unknown")
-                        print(f"[WS] Received message type: {msg_type}")
+                        # Client subscribes to a job to receive scoped updates
+                        if msg_type == "subscribe" and message.get("job_id"):
+                            ws_manager.subscribe(websocket, message["job_id"])
+                        else:
+                            print(f"[WS] Received message type: {msg_type}")
                 except json.JSONDecodeError:
                     # Plain text / keep-alive ping -- ignore
                     pass

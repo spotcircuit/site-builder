@@ -266,6 +266,7 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
         businessContext: businessContext.value.trim() || undefined,
       })
       jobId.value = response.job_id
+      wsService.subscribe(response.job_id)
       addLog('info', `Job created: ${response.job_id}`)
 
       // Add to history

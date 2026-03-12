@@ -749,9 +749,12 @@ async def scrape_business_from_maps(
             os.makedirs(base_profile_dir, exist_ok=True)
 
             # Copy base profile to a temp dir for this scrape job
+            # Skip stale Chrome lock/socket files (Singleton*) that can't be copied
             job_profile_dir = tempfile.mkdtemp(prefix="chrome_profile_")
             if os.listdir(base_profile_dir):
-                shutil.copytree(base_profile_dir, job_profile_dir, dirs_exist_ok=True)
+                def _ignore_locks(d: str, files: list[str]) -> list[str]:
+                    return [f for f in files if f.startswith("Singleton")]
+                shutil.copytree(base_profile_dir, job_profile_dir, dirs_exist_ok=True, ignore=_ignore_locks)
 
             context = await pw.chromium.launch_persistent_context(
                 job_profile_dir,
