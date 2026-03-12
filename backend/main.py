@@ -21,13 +21,17 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from pathlib import Path as FilePath
 
-from fastapi import FastAPI, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from modules.maps_url_parser import parse_maps_url, ParsedMapsUrl
 from modules.maps_scraper import scrape_business_from_maps, BusinessData
+from modules.rate_limiter import (
+    check_rate_limit, record_job_start, record_job_end,
+    verify_turnstile, get_rate_limit_status,
+)
 from modules.website_scraper import scrape_website, WebsiteData
 from modules.site_generator import generate_site, generate_site_content, GeneratedSite, SiteContent
 from modules.react_builder import build_react_site, rebuild_react_site, cleanup_build, ReactBuildResult, get_available_templates
@@ -199,6 +203,7 @@ class GenerateSiteRequest(BaseModel):
     website_url: Optional[str] = None  # Business website URL for scraping
     business_name: Optional[str] = None  # Required when using website_url without maps_url
     business_category: Optional[str] = None  # Optional category hint for website-only generation
+    turnstile_token: Optional[str] = None  # Cloudflare Turnstile verification token
 
 
 class GenerateSiteResponse(BaseModel):
@@ -724,6 +729,7 @@ async def run_generation_pipeline(
                 )
 
         # ── Step 6: Broadcast completion ────────────────────────────────
+        record_job_end(job_id)
         jobs[job_id]["status"] = "completed"
         jobs[job_id]["completed_at"] = datetime.now().isoformat()
         await ws_manager.broadcast_site_ready(
@@ -752,6 +758,7 @@ async def run_generation_pipeline(
             "step": jobs[job_id].get("status", "unknown"),
         })
 
+        record_job_end(job_id)
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = error_message
         jobs[job_id]["error_details"] = error_details
@@ -772,7 +779,7 @@ async def run_generation_pipeline(
     response_model=GenerateSiteResponse,
     status_code=202,
 )
-async def generate_site_endpoint(request: GenerateSiteRequest):
+async def generate_site_endpoint(request: GenerateSiteRequest, raw_request: Request):
     """
     Start an asynchronous site generation job.
 
@@ -783,6 +790,10 @@ async def generate_site_endpoint(request: GenerateSiteRequest):
     Returns immediately with a ``job_id`` that can be polled via
     ``GET /api/job/{job_id}``.
     """
+    # ── Rate limiting ──────────────────────────────────────────────
+    client_ip = check_rate_limit(raw_request)
+    await verify_turnstile(request.turnstile_token, raw_request)
+
     # Validate: at least one URL must be provided
     if not request.maps_url and not request.website_url:
         raise HTTPException(
@@ -798,6 +809,9 @@ async def generate_site_endpoint(request: GenerateSiteRequest):
         )
 
     job_id = str(uuid.uuid4())
+
+    # Track job for rate limiting
+    record_job_start(client_ip, job_id)
 
     jobs[job_id] = {
         "job_id": job_id,
@@ -1194,6 +1208,7 @@ async def health_check():
             "vercel": is_vercel_configured(),
             "gemini": is_gemini_configured(),
         },
+        "rate_limit": get_rate_limit_status(),
     }
 
 

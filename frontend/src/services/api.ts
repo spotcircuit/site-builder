@@ -8,6 +8,7 @@ export async function generateSite(opts: {
   templateName?: string
   deployTarget?: string
   businessContext?: string
+  turnstileToken?: string
 }) {
   const res = await fetch(`${API_BASE}/api/generate-site`, {
     method: 'POST',
@@ -20,6 +21,7 @@ export async function generateSite(opts: {
       website_url: opts.websiteUrl || null,
       business_name: opts.businessName || null,
       business_category: opts.businessCategory || null,
+      turnstile_token: opts.turnstileToken || null,
     })
   })
   if (!res.ok) {

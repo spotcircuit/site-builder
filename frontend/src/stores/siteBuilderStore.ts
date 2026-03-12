@@ -57,6 +57,7 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
   const wsConnected = ref(false)
   const currentMessage = ref('')
   const jobId = ref<string | null>(null)
+  const turnstileToken = ref<string | null>(null)  // Cloudflare Turnstile token (Tier 2)
 
   // ─── URL Detection ───────────────────────────────────
   function detectUrlType(url: string): 'none' | 'maps' | 'website' {
@@ -264,6 +265,7 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
         templateName: templateName.value,
         deployTarget: deployTarget.value,
         businessContext: businessContext.value.trim() || undefined,
+        turnstileToken: turnstileToken.value || undefined,
       })
       jobId.value = response.job_id
       wsService.subscribe(response.job_id)
@@ -605,7 +607,7 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     // State
     phase, mapsUrl, templateName, availableTemplates, deployTarget, businessContext, websiteUrl, isGenerating,
     inputUrl, inputUrlType, businessNameInput, businessCategoryInput, canGenerate,
-    wsConnected, currentMessage, jobId,
+    wsConnected, currentMessage, jobId, turnstileToken,
     completedSteps, activeStep, stepMessages,
     logs, resultHtml, resultTitle, resultBusinessName,
     resultDeployUrl, resultDeployProvider, seoData,
