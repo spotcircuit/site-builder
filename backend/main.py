@@ -112,6 +112,31 @@ def _log_error(job_id: str, error_message: str, error_details: str, context: dic
     except Exception as log_exc:
         logger.warning("Failed to write error log: %s", log_exc)
 
+# Persistent deploy log
+# ---------------------------------------------------------------------------
+DEPLOY_LOG_PATH = FilePath(__file__).parent / "deploy_log.jsonl"
+
+
+def _log_deploy(job_id: str, business_name: str, deploy_url: str, provider: str,
+                template: str, extra: dict | None = None) -> None:
+    """Append a successful deploy entry to the persistent JSONL deploy log."""
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "job_id": job_id,
+        "business_name": business_name,
+        "deploy_url": deploy_url,
+        "provider": provider,
+        "template": template,
+    }
+    if extra:
+        entry.update(extra)
+    try:
+        with open(DEPLOY_LOG_PATH, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as log_exc:
+        logger.warning("Failed to write deploy log: %s", log_exc)
+
+
 # Job TTL: auto-delete undeployed jobs after 3 days
 JOB_TTL_SECONDS = 3 * 24 * 60 * 60  # 3 days
 
@@ -672,6 +697,14 @@ async def run_generation_pipeline(
                     jobs[job_id]["result"]["deploy_url"] = deploy_result.url
                     jobs[job_id]["result"]["deploy_provider"] = deploy_result.provider
 
+                    _log_deploy(
+                        job_id=job_id,
+                        business_name=business_data.name,
+                        deploy_url=deploy_result.url,
+                        provider=deploy_result.provider,
+                        template=template_name,
+                    )
+
                     await ws_manager.broadcast_step(
                         step="deploying",
                         status="completed",
@@ -1190,6 +1223,35 @@ async def clear_errors():
     """Clear the error log."""
     if ERROR_LOG_PATH.exists():
         ERROR_LOG_PATH.unlink()
+    return {"status": "cleared"}
+
+
+# ---------------------------------------------------------------------------
+# Deploy Log (successful site deployments)
+# ---------------------------------------------------------------------------
+@app.get("/api/sites")
+async def get_sites(limit: int = 100):
+    """Return recent successful deploys from the persistent deploy log (newest first)."""
+    if not DEPLOY_LOG_PATH.exists():
+        return {"sites": [], "total": 0}
+    try:
+        lines = DEPLOY_LOG_PATH.read_text().strip().splitlines()
+        entries = []
+        for line in reversed(lines[-limit:]):
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return {"sites": entries, "total": len(lines)}
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to read deploy log: {exc}")
+
+
+@app.delete("/api/sites")
+async def clear_sites():
+    """Clear the deploy log."""
+    if DEPLOY_LOG_PATH.exists():
+        DEPLOY_LOG_PATH.unlink()
     return {"status": "cleared"}
 
 
