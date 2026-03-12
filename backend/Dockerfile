@@ -19,9 +19,15 @@ RUN uv sync --no-dev
 # Install Chromium + all system deps (for Playwright scraping)
 RUN uv run playwright install --with-deps chromium
 
-# Pre-install React template node_modules
+# Pre-install React template node_modules for all 3 templates
 COPY templates/react/package.json templates/react/package-lock.json* templates/react/
 RUN cd templates/react && npm install --prefer-offline
+
+COPY templates/react-bold/package.json templates/react-bold/package-lock.json* templates/react-bold/
+RUN cd templates/react-bold && npm install --prefer-offline
+
+COPY templates/react-elegant/package.json templates/react-elegant/package-lock.json* templates/react-elegant/
+RUN cd templates/react-elegant && npm install --prefer-offline
 
 COPY . .
 

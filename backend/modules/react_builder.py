@@ -221,6 +221,7 @@ def _generate_data_json(
         "email": business_data.get("email") or "",
         "address": business_data.get("address") or "",
         "website": business_data.get("website") or "",
+        "font_scale": business_data.get("font_scale") or content.get("font_scale") or "default",
         "hours": business_data.get("hours"),
         "photos": business_data.get("photos") or [],
         "latitude": business_data.get("latitude"),

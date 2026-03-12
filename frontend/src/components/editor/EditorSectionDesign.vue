@@ -83,6 +83,25 @@
           </select>
         </div>
       </div>
+
+      <!-- Font Scale -->
+      <div>
+        <label class="block text-xs font-medium text-gray-400 mb-1.5">Text Size</label>
+        <div class="grid grid-cols-3 gap-2">
+          <button
+            v-for="scale in fontScales"
+            :key="scale.value"
+            @click="store.updateEditableField('font_scale', scale.value)"
+            class="px-2 py-2 rounded-lg border text-center transition-all"
+            :class="(store.editableData?.font_scale || 'default') === scale.value
+              ? 'border-cyan-500 bg-cyan-500/10 text-cyan-300'
+              : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-white'"
+          >
+            <span class="block text-xs font-medium">{{ scale.label }}</span>
+            <span class="block text-[10px] text-gray-500 mt-0.5">{{ scale.preview }}</span>
+          </button>
+        </div>
+      </div>
     </div>
   </EditorAccordion>
 </template>
@@ -131,6 +150,12 @@ function isActiveTheme(theme: Theme): boolean {
     && d.font_heading === theme.fontHeading
     && d.font_body === theme.fontBody
 }
+
+const fontScales = [
+  { value: 'compact', label: 'Compact', preview: '14px base' },
+  { value: 'default', label: 'Default', preview: '16px base' },
+  { value: 'large', label: 'Large', preview: '18px base' },
+]
 
 const fonts = [
   'Inter', 'Montserrat', 'Poppins', 'Raleway', 'Playfair Display',

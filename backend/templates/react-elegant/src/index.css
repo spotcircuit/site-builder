@@ -35,3 +35,8 @@
 html {
   scroll-behavior: smooth;
 }
+
+/* Font scale — applied to root container, Tailwind rem-based sizes inherit */
+.font-scale-compact { font-size: 14px; }
+.font-scale-default { font-size: 16px; }
+.font-scale-large { font-size: 18px; }

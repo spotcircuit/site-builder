@@ -72,7 +72,7 @@ function App() {
     .sort((a: any, b: any) => a.order - b.order)
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-800 antialiased font-body">
+    <div className={`min-h-screen bg-gray-50 text-gray-800 antialiased font-body font-scale-${data.font_scale || 'default'}`}>
       <LocalBusinessSchema data={data} />
       <Navbar data={data} />
       {sections.map((section: any) => {
